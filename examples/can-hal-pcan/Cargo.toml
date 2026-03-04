@@ -1,0 +1,9 @@
+[package]
+name = "can-hal-pcan-examples"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+can-hal = { path = "../../can-hal" }
+can-hal-pcan = { path = "../../can-hal-pcan" }

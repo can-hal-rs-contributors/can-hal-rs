@@ -1,0 +1,9 @@
+[package]
+name = "can-hal-socketcan-examples"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+can-hal = { path = "../../can-hal" }
+can-hal-socketcan = { path = "../../can-hal-socketcan" }

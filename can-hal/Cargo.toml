@@ -1,0 +1,14 @@
+[package]
+name = "can-hal"
+version = "0.1.0"
+edition = "2021"
+description = "Hardware-agnostic traits for CAN bus communication"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["can", "can-bus", "hal", "canfd", "automotive"]
+categories = ["hardware-support", "embedded"]
+
+[features]
+async = []
+
+[dependencies]

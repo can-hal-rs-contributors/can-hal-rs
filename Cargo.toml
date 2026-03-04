@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = [
+    "can-hal",
+    "can-hal-socketcan",
+    "can-hal-pcan",
+    "examples/can-hal-pcan",
+    "examples/can-hal-socketcan",
+]
