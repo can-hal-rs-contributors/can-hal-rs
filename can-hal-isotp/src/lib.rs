@@ -7,19 +7,22 @@
 //!
 //! # Quick start
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use can_hal::CanId;
 //! use can_hal_isotp::{IsoTpChannel, IsoTpConfig};
+//! use can_hal_socketcan::SocketCanDriver;
+//! use can_hal::{ChannelBuilder, Driver};
 //!
-//! // Assumes `channel` implements `can_hal::channel::{Transmit, Receive}`.
-//! // let channel = SocketCanChannel::open("vcan0").unwrap();
-//! // let config = IsoTpConfig::new(
-//! //     CanId::new_standard(0x7E0).unwrap(),
-//! //     CanId::new_standard(0x7E8).unwrap(),
-//! // );
-//! // let mut isotp = IsoTpChannel::new(channel, config);
-//! // isotp.send(&[0x01, 0x02, 0x03]).unwrap();
-//! // let data = isotp.receive().unwrap();
+//! let driver = SocketCanDriver::new();
+//! let channel = driver.channel_by_name("vcan0")?.bitrate(500_000)?.connect()?;
+//!
+//! let config = IsoTpConfig::new(
+//!     CanId::new_standard(0x7E0)?,
+//!     CanId::new_standard(0x7E8)?,
+//! );
+//! let mut isotp = IsoTpChannel::new(channel, config);
+//! isotp.send(&[0x10, 0x01])?;
+//! let response = isotp.receive()?;
 //! ```
 //!
 //! # Addressing modes
