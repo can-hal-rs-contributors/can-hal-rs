@@ -85,7 +85,7 @@ impl IsoTpConfig {
 
     /// Interpret the raw `st_min` byte as a `Duration`.
     ///
-    /// See [`crate::frame::interpret_st_min`] for the encoding rules.
+    /// See the `frame::interpret_st_min` function for the encoding rules.
     pub fn st_min_duration(&self) -> Duration {
         crate::frame::interpret_st_min(self.st_min)
     }

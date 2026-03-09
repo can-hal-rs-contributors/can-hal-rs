@@ -1,6 +1,6 @@
 //! # can-hal-isotp
 //!
-//! ISO-TP (ISO 15765-2) transport layer for the [`can-hal`] ecosystem.
+//! ISO-TP (ISO 15765-2) transport layer for the [`can_hal`] ecosystem.
 //!
 //! Provides segmentation and reassembly of payloads larger than a single CAN frame,
 //! using the Single Frame / First Frame / Consecutive Frame / Flow Control protocol.
@@ -36,7 +36,7 @@
 //!
 //! # Feature flags
 //!
-//! - `async`: Enables [`AsyncIsoTpChannel`] and [`AsyncIsoTpFdChannel`] backed by Tokio.
+//! - `async`: Enables `AsyncIsoTpChannel` and `AsyncIsoTpFdChannel` backed by Tokio.
 
 pub mod channel;
 pub mod config;
