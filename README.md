@@ -1,5 +1,7 @@
 # can-hal
 
+> **Warning:** These crates are unstable and under active development. APIs may change without notice. Not yet recommended for production use.
+
 Hardware-agnostic CAN bus traits for Rust, with backend implementations for Linux SocketCAN, PEAK PCAN, and KVASER adapters.
 
 ## Crates

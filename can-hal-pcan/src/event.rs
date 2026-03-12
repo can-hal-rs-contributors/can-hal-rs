@@ -9,9 +9,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(not(target_os = "windows"))]
+use crate::error::check_status;
+use crate::error::PcanError;
 #[cfg(target_os = "windows")]
 use crate::error::PcanStatus;
-use crate::error::{check_status, PcanError};
 use crate::ffi;
 use crate::library::PcanLibrary;
 
@@ -24,7 +26,7 @@ pub(crate) struct ReceiveEvent {
     lib: Arc<PcanLibrary>,
     handle: u16,
     #[cfg(target_os = "windows")]
-    event_handle: isize,
+    event_handle: *mut std::ffi::c_void,
     #[cfg(not(target_os = "windows"))]
     fd: i32,
 }
@@ -69,7 +71,7 @@ impl ReceiveEvent {
 
         // Create an auto-reset, initially non-signaled event.
         let event_handle = unsafe { CreateEventW(ptr::null(), 0, 0, ptr::null()) };
-        if event_handle == INVALID_HANDLE_VALUE || event_handle == 0 {
+        if event_handle == INVALID_HANDLE_VALUE || event_handle.is_null() {
             return Err(PcanError::Platform("CreateEventW failed".into()));
         }
 
@@ -164,12 +166,16 @@ impl ReceiveEvent {
     }
 }
 
+// SAFETY: On Windows the HANDLE is an opaque kernel object that is safe to send
+// across threads. On Unix the fd is a plain integer — also Send-safe.
+unsafe impl Send for ReceiveEvent {}
+
 impl Drop for ReceiveEvent {
     fn drop(&mut self) {
         #[cfg(target_os = "windows")]
         {
             // Deregister the event from PCAN, then close the handle.
-            let mut zero: isize = 0;
+            let mut zero: *mut std::ffi::c_void = std::ptr::null_mut();
             unsafe {
                 let _ = (self.lib.set_value)(
                     self.handle,

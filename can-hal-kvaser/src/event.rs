@@ -20,7 +20,7 @@ pub(crate) struct ReceiveEvent {
     #[cfg(not(target_os = "windows"))]
     fd: i32,
     #[cfg(target_os = "windows")]
-    event_handle: isize,
+    event_handle: *mut c_void,
 }
 
 impl ReceiveEvent {
@@ -100,13 +100,13 @@ impl ReceiveEvent {
 
     #[cfg(target_os = "windows")]
     fn new_windows(lib: &KvaserLibrary, handle: i32) -> Result<Self, KvaserError> {
-        let mut event_handle: isize = 0;
+        let mut event_handle: *mut c_void = std::ptr::null_mut();
         let status = unsafe {
             (lib.io_ctl)(
                 handle,
                 CAN_IOCTL_GET_EVENTHANDLE,
-                &mut event_handle as *mut isize as *mut c_void,
-                std::mem::size_of::<isize>() as u32,
+                &mut event_handle as *mut _ as *mut c_void,
+                std::mem::size_of::<*mut c_void>() as u32,
             )
         };
         crate::error::check_status(status)?;
@@ -133,5 +133,9 @@ impl ReceiveEvent {
         }
     }
 }
+
+// SAFETY: On Windows the HANDLE is an opaque kernel object that is safe to send
+// across threads. On Unix the fd is a plain integer — also Send-safe.
+unsafe impl Send for ReceiveEvent {}
 
 // The event handle / fd is owned by the CANlib driver — no cleanup needed.
