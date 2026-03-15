@@ -3,10 +3,6 @@ use std::time::Instant;
 use crate::id::CanId;
 
 const CAN_MAX_LEN: usize = 8;
-const CAN_FD_MAX_LEN: usize = 64;
-
-/// Valid CAN FD data lengths (bytes).
-const FD_VALID_LENS: &[usize] = &[0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64];
 
 /// A classic CAN 2.0 frame (up to 8 data bytes).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +16,7 @@ impl CanFrame {
     /// Create a new classic CAN frame.
     ///
     /// Returns `None` if `data` is longer than 8 bytes.
+    #[must_use]
     pub fn new(id: CanId, data: &[u8]) -> Option<Self> {
         if data.len() > CAN_MAX_LEN {
             return None;
@@ -77,8 +74,9 @@ impl CanFdFrame {
     ///
     /// Returns `None` if `data.len()` is not a valid FD data length
     /// (0, 1, ..., 8, 12, 16, 20, 24, 32, 48, or 64).
+    #[must_use]
     pub fn new(id: CanId, data: &[u8], brs: bool, esi: bool) -> Option<Self> {
-        if data.len() > CAN_FD_MAX_LEN || !FD_VALID_LENS.contains(&data.len()) {
+        if !matches!(data.len(), 0..=8 | 12 | 16 | 20 | 24 | 32 | 48 | 64) {
             return None;
         }
         let mut buf = [0u8; 64];

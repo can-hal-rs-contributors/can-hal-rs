@@ -15,6 +15,7 @@ pub enum CanId {
 
 impl CanId {
     /// Create a standard (11-bit) CAN ID, returning `None` if the value exceeds 0x7FF.
+    #[must_use]
     pub fn new_standard(id: u16) -> Option<Self> {
         if id <= STANDARD_MAX {
             Some(CanId::Standard(id))
@@ -24,6 +25,7 @@ impl CanId {
     }
 
     /// Create an extended (29-bit) CAN ID, returning `None` if the value exceeds 0x1FFFFFFF.
+    #[must_use]
     pub fn new_extended(id: u32) -> Option<Self> {
         if id <= EXTENDED_MAX {
             Some(CanId::Extended(id))

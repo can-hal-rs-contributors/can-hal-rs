@@ -61,7 +61,8 @@ pub(crate) fn from_pcan_msg(msg: &TPCANMsg) -> Result<Option<CanFrame>, PcanErro
         return Ok(None);
     }
     let id = from_pcan_id(msg.id, msg.msg_type)?;
-    let frame = CanFrame::new(id, &msg.data[..msg.len as usize])
+    let len = (msg.len as usize).min(msg.data.len());
+    let frame = CanFrame::new(id, &msg.data[..len])
         .ok_or_else(|| PcanError::InvalidFrame(format!("invalid DLC: {}", msg.len)))?;
     Ok(Some(frame))
 }
@@ -120,21 +121,26 @@ pub(crate) fn from_pcan_msg_fd(msg: &TPCANMsgFD) -> Result<Option<Frame>, PcanEr
 // ---------------------------------------------------------------------------
 
 /// Convert a byte count to a CAN FD DLC code (0–15).
+///
+/// Non-standard byte counts are rounded up to the next valid DLC.
 fn dlc_bytes_to_code(bytes: u8) -> u8 {
     match bytes {
         0..=8 => bytes,
-        12 => 9,
-        16 => 10,
-        20 => 11,
-        24 => 12,
-        32 => 13,
-        48 => 14,
-        64 => 15,
-        _ => bytes,
+        9..=12 => 9,
+        13..=16 => 10,
+        17..=20 => 11,
+        21..=24 => 12,
+        25..=32 => 13,
+        33..=48 => 14,
+        49..=64 => 15,
+        _ => 15,
     }
 }
 
 /// Convert a CAN FD DLC code (0–15) to a byte count.
+///
+/// Out-of-range codes (> 15) are clamped to 64 to prevent panics when
+/// slicing into a 64-byte buffer with data from an FFI source.
 fn dlc_code_to_bytes(dlc: u8) -> u8 {
     match dlc {
         0..=8 => dlc,
@@ -145,7 +151,7 @@ fn dlc_code_to_bytes(dlc: u8) -> u8 {
         13 => 32,
         14 => 48,
         15 => 64,
-        _ => dlc,
+        _ => 64,
     }
 }
 

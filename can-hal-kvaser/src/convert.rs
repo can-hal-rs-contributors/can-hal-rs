@@ -21,6 +21,11 @@ pub(crate) fn from_canlib_id(raw_id: u32, flags: u32) -> Result<CanId, KvaserErr
             KvaserError::InvalidFrame(format!("extended ID out of range: {raw_id:#x}"))
         })
     } else {
+        if raw_id > 0x7FF {
+            return Err(KvaserError::InvalidFrame(format!(
+                "standard ID out of range: {raw_id:#x}"
+            )));
+        }
         CanId::new_standard(raw_id as u16).ok_or_else(|| {
             KvaserError::InvalidFrame(format!("standard ID out of range: {raw_id:#x}"))
         })
@@ -46,7 +51,8 @@ pub(crate) fn from_canlib_frame(
 
     if flags & CAN_MSG_FDF != 0 {
         // CAN FD frame — dlc is already the byte count from CANlib.
-        let len = dlc as usize;
+        // Clamp to 64 to prevent panics on out-of-range values from FFI.
+        let len = (dlc as usize).min(64);
         let brs = flags & CAN_MSG_BRS != 0;
         let esi = flags & CAN_MSG_ESI != 0;
         let frame = CanFdFrame::new(id, &data[..len], brs, esi)

@@ -128,6 +128,8 @@ pub const PCAN_BUSOFF_AUTORESET: u8 = 0x07;
 pub const PCAN_LISTEN_ONLY: u8 = 0x08;
 pub const PCAN_CONTROLLER_NUMBER: u8 = 0x1A;
 pub const PCAN_CHANNEL_CONDITION: u8 = 0x09;
+pub const PCAN_BUSERROR_READ: u8 = 0x24;
+pub const PCAN_BUSERROR_WRITE: u8 = 0x25;
 
 // ---------------------------------------------------------------------------
 // Message structs

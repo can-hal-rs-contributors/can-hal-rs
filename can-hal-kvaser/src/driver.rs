@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use can_hal::{ChannelBuilder, Driver};
+use can_hal::{ChannelBuilder, Driver, DriverFd};
 
 use crate::channel::KvaserChannel;
 use crate::error::{check_status, KvaserError};
@@ -176,6 +176,8 @@ impl Driver for KvaserDriver {
         })
     }
 }
+
+impl DriverFd for KvaserDriver {}
 
 /// Builder for configuring a KVASER channel before going on-bus.
 pub struct KvaserChannelBuilder {

@@ -186,12 +186,11 @@ impl Drop for ReceiveEvent {
                 windows_sys::Win32::Foundation::CloseHandle(self.event_handle);
             }
         }
-        // On Linux, the fd is owned by the PCAN library -- do not close it.
+        // On Linux the fd is owned by the PCAN library — do not close it.
+        // Fields `lib`, `handle`, and `fd` are dropped implicitly; no cleanup needed.
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = &self.lib;
-            let _ = self.handle;
-            let _ = self.fd;
+            let _ = (&self.lib, self.handle, self.fd);
         }
     }
 }

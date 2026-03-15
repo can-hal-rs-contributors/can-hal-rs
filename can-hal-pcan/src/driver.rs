@@ -3,7 +3,7 @@
 use std::ffi::CString;
 use std::sync::Arc;
 
-use can_hal::driver::{ChannelBuilder, Driver};
+use can_hal::driver::{ChannelBuilder, Driver, DriverFd};
 
 use crate::channel::PcanChannel;
 use crate::error::{check_status, PcanError};
@@ -91,6 +91,8 @@ impl Driver for PcanDriver {
         self.channel_on_bus(PcanBusType::Usb, index)
     }
 }
+
+impl DriverFd for PcanDriver {}
 
 /// Builder for configuring a PCAN channel before going on-bus.
 ///

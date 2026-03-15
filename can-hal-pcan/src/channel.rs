@@ -360,7 +360,7 @@ impl BusStatus for PcanChannel {
         let status_rx = unsafe {
             (self.lib.get_value)(
                 self.handle,
-                0x24, // PCAN_BUSERROR_READ
+                ffi::PCAN_BUSERROR_READ,
                 &mut rx_errors as *mut _ as *mut std::ffi::c_void,
                 std::mem::size_of::<u32>() as u32,
             )
@@ -370,7 +370,7 @@ impl BusStatus for PcanChannel {
         let status_tx = unsafe {
             (self.lib.get_value)(
                 self.handle,
-                0x25, // PCAN_BUSERROR_WRITE
+                ffi::PCAN_BUSERROR_WRITE,
                 &mut tx_errors as *mut _ as *mut std::ffi::c_void,
                 std::mem::size_of::<u32>() as u32,
             )

@@ -8,6 +8,24 @@ pub struct Filter {
     pub mask: u32,
 }
 
+impl Filter {
+    /// Create a filter, masking off any bits above the ID's valid range.
+    ///
+    /// Standard IDs: mask is clamped to 11 bits (0x7FF).
+    /// Extended IDs: mask is clamped to 29 bits (0x1FFF_FFFF).
+    #[must_use]
+    pub fn new(id: CanId, mask: u32) -> Self {
+        let max = match id {
+            CanId::Standard(_) => 0x7FF,
+            CanId::Extended(_) => 0x1FFF_FFFF,
+        };
+        Filter {
+            id,
+            mask: mask & max,
+        }
+    }
+}
+
 /// Hardware acceptance filtering.
 ///
 /// **Important**: The exact semantics of multiple filters depend on the backend.
