@@ -171,7 +171,7 @@ impl TransmitFd for PcanChannel {
     fn transmit_fd(&mut self, frame: &CanFdFrame) -> Result<(), Self::Error> {
         if !self.fd_mode {
             return Err(PcanError::InvalidFrame(
-                "channel was not initialized in FD mode; use fd_timing_string() before connect()"
+                "channel was not initialized in FD mode; use data_bitrate() or fd_timing_string() before connect()"
                     .into(),
             ));
         }
@@ -192,7 +192,7 @@ impl ReceiveFd for PcanChannel {
     fn receive_fd(&mut self) -> Result<Timestamped<Frame, Instant>, Self::Error> {
         if !self.fd_mode {
             return Err(PcanError::InvalidFrame(
-                "channel was not initialized in FD mode; use fd_timing_string() before connect()"
+                "channel was not initialized in FD mode; use data_bitrate() or fd_timing_string() before connect()"
                     .into(),
             ));
         }
@@ -207,7 +207,7 @@ impl ReceiveFd for PcanChannel {
     fn try_receive_fd(&mut self) -> Result<Option<Timestamped<Frame, Instant>>, Self::Error> {
         if !self.fd_mode {
             return Err(PcanError::InvalidFrame(
-                "channel was not initialized in FD mode; use fd_timing_string() before connect()"
+                "channel was not initialized in FD mode; use data_bitrate() or fd_timing_string() before connect()"
                     .into(),
             ));
         }
@@ -223,7 +223,7 @@ impl ReceiveFd for PcanChannel {
     ) -> Result<Option<Timestamped<Frame, Instant>>, Self::Error> {
         if !self.fd_mode {
             return Err(PcanError::InvalidFrame(
-                "channel was not initialized in FD mode; use fd_timing_string() before connect()"
+                "channel was not initialized in FD mode; use data_bitrate() or fd_timing_string() before connect()"
                     .into(),
             ));
         }

@@ -105,7 +105,7 @@ struct FdTiming {
 
 /// Look up FD timing parameters for a nominal bitrate (80 MHz clock).
 ///
-/// Returns `(brp, tseg1, tseg2, sjw)` targeting ~80% sample point.
+/// Returns `(brp, tseg1, tseg2, sjw)` targeting 70% sample point.
 fn nominal_fd_timing(bitrate_hz: u32) -> Option<FdTiming> {
     // bitrate = 80_000_000 / (brp * (1 + tseg1 + tseg2))
     // Use 20 TQ (tseg1=13, tseg2=6) for broad compatibility with different
@@ -195,10 +195,11 @@ fn build_fd_timing_string(nominal_hz: u32, data_hz: u32) -> Option<String> {
 /// For classic CAN, use [`bitrate()`](ChannelBuilder::bitrate) with a
 /// standard value (500000, 250000, etc.).
 ///
-/// For CAN FD, use [`fd_timing_string()`](PcanChannelBuilder::fd_timing_string)
-/// to provide the raw PCAN timing parameter string, since FD initialization
-/// requires detailed timing parameters that cannot be derived from a simple
-/// bitrate value.
+/// For CAN FD, use [`bitrate()`](ChannelBuilder::bitrate) and
+/// [`data_bitrate()`](ChannelBuilder::data_bitrate). Timing parameters
+/// are derived automatically for common bitrates (80 MHz clock). For
+/// custom timing, use [`fd_timing_string()`](PcanChannelBuilder::fd_timing_string)
+/// instead.
 ///
 /// # CAN 2.0 Example
 ///
@@ -220,10 +221,8 @@ fn build_fd_timing_string(nominal_hz: u32, data_hz: u32) -> Option<String> {
 ///
 /// let driver = PcanDriver::new()?;
 /// let channel = driver.channel(0)?
-///     .fd_timing_string(
-///         "f_clock_mhz=80, nom_brp=1, nom_tseg1=63, nom_tseg2=16, \
-///          nom_sjw=16, data_brp=1, data_tseg1=7, data_tseg2=2, data_sjw=2"
-///     )?
+///     .bitrate(500_000)?
+///     .data_bitrate(4_000_000)?
 ///     .connect()?;
 /// ```
 pub struct PcanChannelBuilder {
@@ -243,8 +242,8 @@ impl PcanChannelBuilder {
     /// trait. When set, [`connect()`](ChannelBuilder::connect) will use
     /// `CAN_InitializeFD` instead of `CAN_Initialize`.
     ///
-    /// Format: `"f_clock_mhz=80, nom_brp=1, nom_tseg1=63, nom_tseg2=16,
-    ///           nom_sjw=16, data_brp=1, data_tseg1=7, data_tseg2=2, data_sjw=2"`
+    /// Format: `"f_clock_mhz=80, nom_brp=8, nom_tseg1=13, nom_tseg2=6,
+    ///           nom_sjw=4, data_brp=2, data_tseg1=7, data_tseg2=2, data_sjw=2"`
     pub fn fd_timing_string(mut self, timing: &str) -> Result<Self, PcanError> {
         self.fd_timing_string = Some(timing.to_string());
         Ok(self)

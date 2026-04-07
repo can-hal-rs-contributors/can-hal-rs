@@ -28,8 +28,10 @@
 //!
 //! # CAN FD
 //!
-//! For CAN FD, use the backend-specific
-//! [`fd_timing_string()`](PcanChannelBuilder::fd_timing_string) on the builder:
+//! Use [`bitrate()`](can_hal::ChannelBuilder::bitrate) and
+//! [`data_bitrate()`](can_hal::ChannelBuilder::data_bitrate) to open an FD
+//! channel. Timing parameters are derived automatically for common bitrates
+//! (80 MHz clock).
 //!
 //! ```rust,ignore
 //! use can_hal::{ChannelBuilder, TransmitFd, CanId, CanFdFrame};
@@ -38,16 +40,17 @@
 //! let driver = PcanDriver::new()?;
 //! let mut channel = driver
 //!     .channel(0)?
-//!     .fd_timing_string(
-//!         "f_clock_mhz=80, nom_brp=1, nom_tseg1=63, nom_tseg2=16, \
-//!          nom_sjw=16, data_brp=1, data_tseg1=7, data_tseg2=2, data_sjw=2"
-//!     )?
+//!     .bitrate(500_000)?
+//!     .data_bitrate(4_000_000)?
 //!     .connect()?;
 //!
 //! let id = CanId::new_extended(0x18DA00F1).unwrap();
 //! let frame = CanFdFrame::new(id, &[0x10, 0x03], true, false).unwrap();
 //! channel.transmit_fd(&frame)?;
 //! ```
+//!
+//! For custom timing, use the backend-specific
+//! [`fd_timing_string()`](PcanChannelBuilder::fd_timing_string) instead.
 //!
 //! # Prerequisites
 //!
