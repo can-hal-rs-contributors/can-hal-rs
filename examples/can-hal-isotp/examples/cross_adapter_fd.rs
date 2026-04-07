@@ -31,11 +31,11 @@ fn main() {
 
     // Test payloads: FD single frame sizes and multi-frame
     let payloads: Vec<Vec<u8>> = vec![
-        vec![0x10, 0x01],                          // 2 bytes: UDS DiagSessionControl
-        (0..7).collect(),                           // 7 bytes: classic SF limit
-        (0..62).map(|i| i as u8).collect(),         // 62 bytes: max FD single frame
-        (0..200).map(|i| i as u8).collect(),        // 200 bytes: multi-frame
-        (0..1000).map(|i| i as u8).collect(),       // 1000 bytes: large multi-frame
+        vec![0x10, 0x01],                                 // 2 bytes: UDS DiagSessionControl
+        (0..7).collect(),                                 // 7 bytes: classic SF limit
+        (0..62).map(|i| i as u8).collect(),               // 62 bytes: max FD single frame
+        (0..200).map(|i| i as u8).collect(),              // 200 bytes: multi-frame
+        (0..1000).map(|i| i as u8).collect(),             // 1000 bytes: large multi-frame
         (0..4000u16).map(|i| (i & 0xFF) as u8).collect(), // 4000 bytes: stress test
     ];
 
@@ -105,7 +105,10 @@ fn main() {
     }
 
     // --- Kvaser -> PCAN ---
-    println!("--- Test {}: 500 bytes (Kvaser -> PCAN) ---", payloads.len() + 1);
+    println!(
+        "--- Test {}: 500 bytes (Kvaser -> PCAN) ---",
+        payloads.len() + 1
+    );
     let payload: Vec<u8> = (0..500).map(|i| (i * 3) as u8).collect();
     let payload_send = payload.clone();
     let payload_expected = payload.clone();

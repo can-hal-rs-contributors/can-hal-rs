@@ -111,10 +111,30 @@ fn nominal_fd_timing(bitrate_hz: u32) -> Option<FdTiming> {
     // Use 20 TQ (tseg1=13, tseg2=6) for broad compatibility with different
     // CAN FD adapters. SJW=4 provides good resynchronization tolerance.
     match bitrate_hz {
-        1_000_000 => Some(FdTiming { brp: 4, tseg1: 13, tseg2: 6, sjw: 4 }),
-        500_000   => Some(FdTiming { brp: 8, tseg1: 13, tseg2: 6, sjw: 4 }),
-        250_000   => Some(FdTiming { brp: 16, tseg1: 13, tseg2: 6, sjw: 4 }),
-        125_000   => Some(FdTiming { brp: 32, tseg1: 13, tseg2: 6, sjw: 4 }),
+        1_000_000 => Some(FdTiming {
+            brp: 4,
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+        }),
+        500_000 => Some(FdTiming {
+            brp: 8,
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+        }),
+        250_000 => Some(FdTiming {
+            brp: 16,
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+        }),
+        125_000 => Some(FdTiming {
+            brp: 32,
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+        }),
         _ => None,
     }
 }
@@ -122,11 +142,36 @@ fn nominal_fd_timing(bitrate_hz: u32) -> Option<FdTiming> {
 /// Look up FD timing parameters for a data-phase bitrate (80 MHz clock).
 fn data_fd_timing(bitrate_hz: u32) -> Option<FdTiming> {
     match bitrate_hz {
-        8_000_000 => Some(FdTiming { brp: 1, tseg1: 7, tseg2: 2, sjw: 2 }),
-        5_000_000 => Some(FdTiming { brp: 1, tseg1: 12, tseg2: 3, sjw: 3 }),
-        4_000_000 => Some(FdTiming { brp: 2, tseg1: 7, tseg2: 2, sjw: 2 }),
-        2_000_000 => Some(FdTiming { brp: 2, tseg1: 15, tseg2: 4, sjw: 4 }),
-        1_000_000 => Some(FdTiming { brp: 4, tseg1: 15, tseg2: 4, sjw: 4 }),
+        8_000_000 => Some(FdTiming {
+            brp: 1,
+            tseg1: 7,
+            tseg2: 2,
+            sjw: 2,
+        }),
+        5_000_000 => Some(FdTiming {
+            brp: 1,
+            tseg1: 12,
+            tseg2: 3,
+            sjw: 3,
+        }),
+        4_000_000 => Some(FdTiming {
+            brp: 2,
+            tseg1: 7,
+            tseg2: 2,
+            sjw: 2,
+        }),
+        2_000_000 => Some(FdTiming {
+            brp: 2,
+            tseg1: 15,
+            tseg2: 4,
+            sjw: 4,
+        }),
+        1_000_000 => Some(FdTiming {
+            brp: 4,
+            tseg1: 15,
+            tseg2: 4,
+            sjw: 4,
+        }),
         _ => None,
     }
 }
@@ -141,8 +186,7 @@ fn build_fd_timing_string(nominal_hz: u32, data_hz: u32) -> Option<String> {
         "f_clock_mhz=80, \
          nom_brp={}, nom_tseg1={}, nom_tseg2={}, nom_sjw={}, \
          data_brp={}, data_tseg1={}, data_tseg2={}, data_sjw={}",
-        nom.brp, nom.tseg1, nom.tseg2, nom.sjw,
-        data.brp, data.tseg1, data.tseg2, data.sjw,
+        nom.brp, nom.tseg1, nom.tseg2, nom.sjw, data.brp, data.tseg1, data.tseg2, data.sjw,
     ))
 }
 
@@ -237,9 +281,8 @@ impl ChannelBuilder for PcanChannelBuilder {
             Some(timing.clone())
         } else if let Some(data_hz) = self.data_bitrate {
             let nominal_hz = self.bitrate_hz.ok_or(PcanError::UnsupportedBitrate(0))?;
-            let timing = build_fd_timing_string(nominal_hz, data_hz).ok_or_else(|| {
-                PcanError::UnsupportedBitrate(data_hz)
-            })?;
+            let timing = build_fd_timing_string(nominal_hz, data_hz)
+                .ok_or_else(|| PcanError::UnsupportedBitrate(data_hz))?;
             Some(timing)
         } else {
             None

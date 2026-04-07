@@ -61,7 +61,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "RX classic: ID=0x{:03X} DLC={} data=[{}] ({elapsed:.1?} ago)",
                             classic.id().raw(),
                             classic.len(),
-                            classic.data()
+                            classic
+                                .data()
                                 .iter()
                                 .map(|b| format!("{b:02X}"))
                                 .collect::<Vec<_>>()
