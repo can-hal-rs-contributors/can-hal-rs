@@ -1,3 +1,4 @@
+use std::os::raw::c_long;
 use std::sync::Arc;
 
 use can_hal::{ChannelBuilder, Driver, DriverFd};
@@ -31,66 +32,67 @@ pub struct BusParamsFd {
 /// These assume an 80 MHz CAN clock (Kvaser U100 and most modern Kvaser
 /// adapters). The hardware derives the prescaler from `freq / (1 + tseg1 + tseg2)`.
 fn default_nominal_params(bitrate_hz: u32) -> BusParams {
-    // Choose timing segments that give ~80% sample point where possible.
-    // tq_count = 1 + tseg1 + tseg2; sample_point = (1 + tseg1) / tq_count.
+    // 20 TQ (1 + tseg1 + tseg2), 70% sample point, SJW=4 for good
+    // resynchronization tolerance. These values are verified on Kvaser U100
+    // and provide broad compatibility with other CAN FD adapters.
     match bitrate_hz {
         1_000_000 => BusParams {
-            tseg1: 5,
-            tseg2: 2,
-            sjw: 2,
-            no_samp: 1,
-            sync_mode: 0,
-        }, // 75.0%
-        500_000 => BusParams {
             tseg1: 13,
-            tseg2: 2,
-            sjw: 2,
-            no_samp: 1,
-            sync_mode: 0,
-        }, // 87.5%
-        250_000 => BusParams {
-            tseg1: 13,
-            tseg2: 2,
-            sjw: 2,
-            no_samp: 1,
-            sync_mode: 0,
-        }, // 87.5%
-        125_000 => BusParams {
-            tseg1: 13,
-            tseg2: 2,
-            sjw: 2,
-            no_samp: 1,
-            sync_mode: 0,
-        }, // 87.5%
-        100_000 => BusParams {
-            tseg1: 13,
-            tseg2: 2,
-            sjw: 2,
-            no_samp: 1,
-            sync_mode: 0,
-        }, // 87.5%
-        83_333 => BusParams {
-            tseg1: 13,
-            tseg2: 2,
-            sjw: 2,
-            no_samp: 1,
-            sync_mode: 0,
-        }, // 87.5%
-        50_000 => BusParams {
-            tseg1: 13,
-            tseg2: 2,
-            sjw: 2,
-            no_samp: 1,
-            sync_mode: 0,
-        }, // 87.5%
-        // Fallback: 20 TQ, ~80% sample point. Works with most bitrates.
-        _ => BusParams {
-            tseg1: 15,
-            tseg2: 4,
+            tseg2: 6,
             sjw: 4,
             no_samp: 1,
             sync_mode: 0,
-        }, // 80.0%
+        }, // 70.0%
+        500_000 => BusParams {
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+            no_samp: 1,
+            sync_mode: 0,
+        }, // 70.0%
+        250_000 => BusParams {
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+            no_samp: 1,
+            sync_mode: 0,
+        }, // 70.0%
+        125_000 => BusParams {
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+            no_samp: 1,
+            sync_mode: 0,
+        }, // 70.0%
+        100_000 => BusParams {
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+            no_samp: 1,
+            sync_mode: 0,
+        }, // 70.0%
+        83_333 => BusParams {
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+            no_samp: 1,
+            sync_mode: 0,
+        }, // 70.0%
+        50_000 => BusParams {
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+            no_samp: 1,
+            sync_mode: 0,
+        }, // 70.0%
+        // Fallback: 20 TQ, 70% sample point.
+        _ => BusParams {
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+            no_samp: 1,
+            sync_mode: 0,
+        }, // 70.0%
     }
 }
 
@@ -262,7 +264,7 @@ impl ChannelBuilder for KvaserChannelBuilder {
             check_status(unsafe {
                 (self.lib.set_bus_params)(
                     handle,
-                    bitrate_hz as i32,
+                    bitrate_hz as c_long,
                     params.tseg1,
                     params.tseg2,
                     params.sjw,
@@ -278,7 +280,7 @@ impl ChannelBuilder for KvaserChannelBuilder {
                 check_status(unsafe {
                     (self.lib.set_bus_params_fd)(
                         handle,
-                        fd_hz as i32,
+                        fd_hz as c_long,
                         fd_params.tseg1,
                         fd_params.tseg2,
                         fd_params.sjw,

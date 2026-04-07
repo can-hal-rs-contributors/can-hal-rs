@@ -28,6 +28,9 @@ name = "loopback_fd"
 [[example]]
 name = "cross_adapter"
 
+[[example]]
+name = "cross_adapter_fd"
+
 [dependencies]
 can-hal-isotp = { path = "../../can-hal-isotp" }
 can-hal-socketcan = { path = "../../can-hal-socketcan" }

@@ -74,6 +74,7 @@ impl PcanDriver {
             lib: self.lib.clone(),
             handle,
             bitrate: None,
+            bitrate_hz: None,
             data_bitrate: None,
             sample_point: None,
             fd_timing_string: None,
@@ -93,6 +94,101 @@ impl Driver for PcanDriver {
 }
 
 impl DriverFd for PcanDriver {}
+
+/// FD timing parameters for a single phase (nominal or data).
+struct FdTiming {
+    brp: u32,
+    tseg1: u32,
+    tseg2: u32,
+    sjw: u32,
+}
+
+/// Look up FD timing parameters for a nominal bitrate (80 MHz clock).
+///
+/// Returns `(brp, tseg1, tseg2, sjw)` targeting ~80% sample point.
+fn nominal_fd_timing(bitrate_hz: u32) -> Option<FdTiming> {
+    // bitrate = 80_000_000 / (brp * (1 + tseg1 + tseg2))
+    // Use 20 TQ (tseg1=13, tseg2=6) for broad compatibility with different
+    // CAN FD adapters. SJW=4 provides good resynchronization tolerance.
+    match bitrate_hz {
+        1_000_000 => Some(FdTiming {
+            brp: 4,
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+        }),
+        500_000 => Some(FdTiming {
+            brp: 8,
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+        }),
+        250_000 => Some(FdTiming {
+            brp: 16,
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+        }),
+        125_000 => Some(FdTiming {
+            brp: 32,
+            tseg1: 13,
+            tseg2: 6,
+            sjw: 4,
+        }),
+        _ => None,
+    }
+}
+
+/// Look up FD timing parameters for a data-phase bitrate (80 MHz clock).
+fn data_fd_timing(bitrate_hz: u32) -> Option<FdTiming> {
+    match bitrate_hz {
+        8_000_000 => Some(FdTiming {
+            brp: 1,
+            tseg1: 7,
+            tseg2: 2,
+            sjw: 2,
+        }),
+        5_000_000 => Some(FdTiming {
+            brp: 1,
+            tseg1: 12,
+            tseg2: 3,
+            sjw: 3,
+        }),
+        4_000_000 => Some(FdTiming {
+            brp: 2,
+            tseg1: 7,
+            tseg2: 2,
+            sjw: 2,
+        }),
+        2_000_000 => Some(FdTiming {
+            brp: 2,
+            tseg1: 15,
+            tseg2: 4,
+            sjw: 4,
+        }),
+        1_000_000 => Some(FdTiming {
+            brp: 4,
+            tseg1: 15,
+            tseg2: 4,
+            sjw: 4,
+        }),
+        _ => None,
+    }
+}
+
+/// Build an FD timing string from nominal and data bitrates.
+///
+/// Returns `None` if either bitrate is not in the lookup table.
+fn build_fd_timing_string(nominal_hz: u32, data_hz: u32) -> Option<String> {
+    let nom = nominal_fd_timing(nominal_hz)?;
+    let data = data_fd_timing(data_hz)?;
+    Some(format!(
+        "f_clock_mhz=80, \
+         nom_brp={}, nom_tseg1={}, nom_tseg2={}, nom_sjw={}, \
+         data_brp={}, data_tseg1={}, data_tseg2={}, data_sjw={}",
+        nom.brp, nom.tseg1, nom.tseg2, nom.sjw, data.brp, data.tseg1, data.tseg2, data.sjw,
+    ))
+}
 
 /// Builder for configuring a PCAN channel before going on-bus.
 ///
@@ -134,6 +230,7 @@ pub struct PcanChannelBuilder {
     lib: Arc<PcanLibrary>,
     handle: u16,
     bitrate: Option<u16>,
+    bitrate_hz: Option<u32>,
     data_bitrate: Option<u32>,
     sample_point: Option<f32>,
     fd_timing_string: Option<String>,
@@ -162,6 +259,7 @@ impl ChannelBuilder for PcanChannelBuilder {
         let pcan_baud =
             ffi::bitrate_to_pcan(bitrate).ok_or(PcanError::UnsupportedBitrate(bitrate))?;
         self.bitrate = Some(pcan_baud);
+        self.bitrate_hz = Some(bitrate);
         Ok(self)
     }
 
@@ -176,12 +274,21 @@ impl ChannelBuilder for PcanChannelBuilder {
     }
 
     fn connect(self) -> Result<Self::Channel, Self::Error> {
-        if let Some(ref timing) = self.fd_timing_string {
-            // FD initialization — data_bitrate and sample_point are ignored
-            // because the fd_timing_string contains the full timing parameters.
-            let _ = self.data_bitrate;
-            let _ = self.sample_point;
+        // Determine the FD timing string to use:
+        // 1. Explicit fd_timing_string (backend-specific) takes priority.
+        // 2. If data_bitrate was set, auto-generate from bitrate + data_bitrate.
+        let fd_timing = if let Some(ref timing) = self.fd_timing_string {
+            Some(timing.clone())
+        } else if let Some(data_hz) = self.data_bitrate {
+            let nominal_hz = self.bitrate_hz.ok_or(PcanError::UnsupportedBitrate(0))?;
+            let timing = build_fd_timing_string(nominal_hz, data_hz)
+                .ok_or_else(|| PcanError::UnsupportedBitrate(data_hz))?;
+            Some(timing)
+        } else {
+            None
+        };
 
+        if let Some(ref timing) = fd_timing {
             let c_timing = CString::new(timing.as_str())
                 .map_err(|_| PcanError::InvalidFrame("timing string contains null byte".into()))?;
 
@@ -189,9 +296,7 @@ impl ChannelBuilder for PcanChannelBuilder {
             check_status(status)?;
             PcanChannel::new(self.lib, self.handle, true)
         } else {
-            // Classic CAN initialization — sample_point is not supported
-            // by PCAN-Basic's CAN_Initialize (fixed at the hardware default).
-            let _ = self.sample_point;
+            // Classic CAN initialization
             let baud = self.bitrate.ok_or(PcanError::UnsupportedBitrate(0))?;
 
             // Plug & Play hardware (USB, PCI, LAN): hw_type=0, io_port=0, interrupt=0

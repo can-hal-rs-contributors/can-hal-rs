@@ -48,7 +48,7 @@ pub type FnClose = unsafe extern "C" fn(hnd: CanHandle) -> CanStatus;
 
 pub type FnSetBusParams = unsafe extern "C" fn(
     hnd: CanHandle,
-    freq: i32,
+    freq: c_long,
     tseg1: u32,
     tseg2: u32,
     sjw: u32,
@@ -58,7 +58,7 @@ pub type FnSetBusParams = unsafe extern "C" fn(
 
 pub type FnSetBusParamsFd = unsafe extern "C" fn(
     hnd: CanHandle,
-    freq_brs: i32,
+    freq_brs: c_long,
     tseg1: u32,
     tseg2: u32,
     sjw: u32,
