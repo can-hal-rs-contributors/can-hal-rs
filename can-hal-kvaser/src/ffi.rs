@@ -36,17 +36,20 @@ pub const CAN_IOCTL_GET_EVENTHANDLE: u32 = 6;
 
 // Function pointer types for dynamically loaded CANlib symbols.
 //
+// Calling convention: `extern "system"` matches CANlib's `CANLIBAPI` macro,
+// which expands to `__stdcall` on Windows and is a no-op on Linux.
+//
 // Parameter types follow the CANlib C API exactly:
 //   - `long` / `unsigned long` → c_long / c_ulong  (64-bit on Linux, 32-bit on Windows)
 //   - `int`  / `unsigned int`  → i32 / u32
 
-pub type FnInitializeLibrary = unsafe extern "C" fn();
+pub type FnInitializeLibrary = unsafe extern "system" fn();
 
-pub type FnOpenChannel = unsafe extern "C" fn(channel: CanHandle, flags: i32) -> CanHandle;
+pub type FnOpenChannel = unsafe extern "system" fn(channel: CanHandle, flags: i32) -> CanHandle;
 
-pub type FnClose = unsafe extern "C" fn(hnd: CanHandle) -> CanStatus;
+pub type FnClose = unsafe extern "system" fn(hnd: CanHandle) -> CanStatus;
 
-pub type FnSetBusParams = unsafe extern "C" fn(
+pub type FnSetBusParams = unsafe extern "system" fn(
     hnd: CanHandle,
     freq: c_long,
     tseg1: u32,
@@ -56,7 +59,7 @@ pub type FnSetBusParams = unsafe extern "C" fn(
     sync_mode: u32,
 ) -> CanStatus;
 
-pub type FnSetBusParamsFd = unsafe extern "C" fn(
+pub type FnSetBusParamsFd = unsafe extern "system" fn(
     hnd: CanHandle,
     freq_brs: c_long,
     tseg1: u32,
@@ -64,12 +67,12 @@ pub type FnSetBusParamsFd = unsafe extern "C" fn(
     sjw: u32,
 ) -> CanStatus;
 
-pub type FnBusOn = unsafe extern "C" fn(hnd: CanHandle) -> CanStatus;
+pub type FnBusOn = unsafe extern "system" fn(hnd: CanHandle) -> CanStatus;
 
-pub type FnBusOff = unsafe extern "C" fn(hnd: CanHandle) -> CanStatus;
+pub type FnBusOff = unsafe extern "system" fn(hnd: CanHandle) -> CanStatus;
 
 /// `canWrite(CanHandle, long id, void *msg, unsigned int dlc, unsigned int flag)`
-pub type FnWrite = unsafe extern "C" fn(
+pub type FnWrite = unsafe extern "system" fn(
     hnd: CanHandle,
     id: c_long,
     msg: *const c_void,
@@ -77,10 +80,10 @@ pub type FnWrite = unsafe extern "C" fn(
     flag: u32,
 ) -> CanStatus;
 
-pub type FnWriteSync = unsafe extern "C" fn(hnd: CanHandle, timeout: c_ulong) -> CanStatus;
+pub type FnWriteSync = unsafe extern "system" fn(hnd: CanHandle, timeout: c_ulong) -> CanStatus;
 
 /// `canRead(CanHandle, long *id, void *msg, unsigned int *dlc, unsigned int *flag, unsigned long *time)`
-pub type FnRead = unsafe extern "C" fn(
+pub type FnRead = unsafe extern "system" fn(
     hnd: CanHandle,
     id: *mut c_long,
     msg: *mut c_void,
@@ -90,13 +93,14 @@ pub type FnRead = unsafe extern "C" fn(
 ) -> CanStatus;
 
 /// `canAccept(CanHandle, long envelope, unsigned int flag)`
-pub type FnAccept = unsafe extern "C" fn(hnd: CanHandle, envelope: c_long, flag: u32) -> CanStatus;
+pub type FnAccept =
+    unsafe extern "system" fn(hnd: CanHandle, envelope: c_long, flag: u32) -> CanStatus;
 
 /// `canReadStatus(CanHandle, unsigned long *flags)`
-pub type FnReadStatus = unsafe extern "C" fn(hnd: CanHandle, flags: *mut c_ulong) -> CanStatus;
+pub type FnReadStatus = unsafe extern "system" fn(hnd: CanHandle, flags: *mut c_ulong) -> CanStatus;
 
 /// `canReadErrorCounters(CanHandle, unsigned int *txErr, unsigned int *rxErr, unsigned int *ovErr)`
-pub type FnReadErrorCounters = unsafe extern "C" fn(
+pub type FnReadErrorCounters = unsafe extern "system" fn(
     hnd: CanHandle,
     tx_err: *mut u32,
     rx_err: *mut u32,
@@ -104,5 +108,9 @@ pub type FnReadErrorCounters = unsafe extern "C" fn(
 ) -> CanStatus;
 
 /// `canIoCtl(CanHandle, unsigned int func, void *buf, unsigned int buflen)`
-pub type FnIoCtl =
-    unsafe extern "C" fn(hnd: CanHandle, func: u32, buf: *mut c_void, buflen: u32) -> CanStatus;
+pub type FnIoCtl = unsafe extern "system" fn(
+    hnd: CanHandle,
+    func: u32,
+    buf: *mut c_void,
+    buflen: u32,
+) -> CanStatus;
