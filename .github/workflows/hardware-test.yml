@@ -1,0 +1,187 @@
+name: Hardware Tests
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  pull-requests: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-permission:
+    name: Check permission
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/test')
+    runs-on: ubuntu-latest
+    outputs:
+      authorized: ${{ steps.check.outputs.authorized }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+    steps:
+      - name: Check commenter permission
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.payload.comment.user.login,
+            });
+            const authorized = ['admin', 'write'].includes(data.permission);
+            core.setOutput('authorized', authorized.toString());
+            if (!authorized) {
+              core.warning(`User ${context.payload.comment.user.login} does not have write access.`);
+            }
+
+      - name: Add reaction
+        if: steps.check.outputs.authorized == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes',
+            });
+
+      - name: Get PR details
+        id: pr
+        if: steps.check.outputs.authorized == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            core.setOutput('head_sha', data.head.sha);
+
+  linux-hardware-tests:
+    name: Linux hardware tests
+    needs: check-permission
+    if: needs.check-permission.outputs.authorized == 'true'
+    runs-on: [self-hosted, nixos, can-bus]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-permission.outputs.head_sha }}
+
+      - name: Set up SocketCAN virtual interface
+        run: |
+          sudo modprobe vcan
+          sudo ip link add vcan0 type vcan 2>/dev/null || true
+          sudo ip link set vcan0 up
+
+      # Unit tests (conversion, FFI mapping — no hardware needed).
+      - name: Test can-hal-socketcan (unit)
+        run: cargo test -p can-hal-socketcan
+
+      - name: Test can-hal-pcan (unit)
+        run: cargo test -p can-hal-pcan
+
+      - name: Test can-hal-kvaser (unit)
+        run: cargo test -p can-hal-kvaser
+
+      # Runtime tests — require real hardware and drivers.
+      - name: SocketCAN loopback (vcan0)
+        working-directory: examples/can-hal-isotp
+        run: cargo run --example loopback
+
+      - name: SocketCAN loopback FD (vcan0)
+        working-directory: examples/can-hal-isotp
+        run: cargo run --example loopback_fd
+
+      - name: PCAN bus status check
+        working-directory: examples/can-hal-pcan
+        run: cargo run --example bus_status
+
+      - name: Cross-adapter ISO-TP (PCAN <-> Kvaser)
+        working-directory: examples/can-hal-isotp
+        run: cargo run --example cross_adapter
+
+      - name: Cross-adapter ISO-TP FD (PCAN <-> Kvaser)
+        working-directory: examples/can-hal-isotp
+        run: cargo run --example cross_adapter_fd
+
+  windows-hardware-tests:
+    name: Windows hardware tests
+    needs: [check-permission, linux-hardware-tests]
+    if: needs.check-permission.outputs.authorized == 'true'
+    runs-on: [self-hosted, nixos, can-bus]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-permission.outputs.head_sha }}
+
+      - name: Start Windows VM
+        run: ci-vm-start
+
+      - name: Wait for VM SSH
+        run: ci-vm-wait-ssh
+
+      - name: Attach USB devices to VM
+        run: ci-usb-to-vm
+
+      - name: Copy source to VM
+        run: |
+          rsync -az --delete \
+            -e "ssh -o StrictHostKeyChecking=no -i /var/lib/github-runner/win-test-ssh-key" \
+            . ci@192.168.122.10:~/can-hal-rs/
+
+      # Unit tests on Windows.
+      - name: Test can-hal-pcan (Windows unit)
+        run: ci-run-windows-tests can-hal-pcan
+
+      - name: Test can-hal-kvaser (Windows unit)
+        run: ci-run-windows-tests can-hal-kvaser
+
+      # Runtime tests on Windows — require PCAN/Kvaser drivers and hardware.
+      - name: PCAN bus status (Windows)
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /var/lib/github-runner/win-test-ssh-key \
+            ci@192.168.122.10 \
+            "cd can-hal-rs/examples/can-hal-pcan && cargo run --example bus_status"
+
+      - name: PCAN send/receive (Windows)
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /var/lib/github-runner/win-test-ssh-key \
+            ci@192.168.122.10 \
+            "cd can-hal-rs/examples/can-hal-pcan && cargo run --example pcan_send_fd"
+
+      - name: Kvaser send/receive (Windows)
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /var/lib/github-runner/win-test-ssh-key \
+            ci@192.168.122.10 \
+            "cd can-hal-rs/examples/can-hal-kvaser && cargo run --example kvaser_send_fd"
+
+      - name: Return USB to host
+        if: always()
+        run: ci-usb-to-host
+
+      - name: Stop Windows VM
+        if: always()
+        run: ci-vm-stop
+
+      - name: Report result
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const status = '${{ job.status }}' === 'success' ? ':white_check_mark:' : ':x:';
+            const body = `${status} **Hardware tests ${('${{ job.status }}')}**\n\n` +
+              `- Linux tests: ${{ needs.linux-hardware-tests.result }}\n` +
+              `- Windows tests: ${{ job.status }}\n\n` +
+              `Commit: ${{ needs.check-permission.outputs.head_sha }}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body,
+            });
