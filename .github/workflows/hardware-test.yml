@@ -25,7 +25,7 @@ jobs:
     steps:
       - name: Check commenter permission
         id: check
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
@@ -41,7 +41,7 @@ jobs:
 
       - name: Add reaction
         if: steps.check.outputs.authorized == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             await github.rest.reactions.createForIssueComment({
@@ -54,7 +54,7 @@ jobs:
       - name: Get PR details
         id: pr
         if: steps.check.outputs.authorized == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const { data } = await github.rest.pulls.get({
@@ -70,7 +70,7 @@ jobs:
     if: needs.check-permission.outputs.authorized == 'true'
     runs-on: [self-hosted, nixos, can-bus]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.check-permission.outputs.head_sha }}
 
@@ -117,7 +117,7 @@ jobs:
     if: needs.check-permission.outputs.authorized == 'true'
     runs-on: [self-hosted, nixos, can-bus]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.check-permission.outputs.head_sha }}
 
@@ -172,7 +172,7 @@ jobs:
 
       - name: Report result
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const status = '${{ job.status }}' === 'success' ? ':white_check_mark:' : ':x:';
