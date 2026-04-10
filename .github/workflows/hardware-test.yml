@@ -74,6 +74,14 @@ jobs:
         with:
           ref: ${{ needs.check-permission.outputs.head_sha }}
 
+      - name: Debug environment
+        run: |
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+          echo "USER=$(whoami)"
+          id
+          ls -la /dev/pcan* /dev/mhydra* 2>/dev/null || true
+          cat /proc/pcan
+
       # Hardware tests — require real PCAN and Kvaser adapters.
       - name: PCAN bus status check
         working-directory: examples/can-hal-pcan
