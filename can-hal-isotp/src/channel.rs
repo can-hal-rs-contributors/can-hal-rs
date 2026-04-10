@@ -144,11 +144,14 @@ where
                 return Err(IsoTpError::Timeout);
             }
 
-            let ts_frame = self
+            let ts_frame = match self
                 .channel
                 .receive_timeout(remaining)
                 .map_err(IsoTpError::CanError)?
-                .ok_or(IsoTpError::Timeout)?;
+            {
+                Some(f) => f,
+                None => continue,
+            };
 
             let can_frame = ts_frame.into_frame();
             if can_frame.id() != self.config.rx_id {
@@ -183,11 +186,14 @@ where
                             return Err(IsoTpError::Timeout);
                         }
 
-                        let ts = self
+                        let ts = match self
                             .channel
                             .receive_timeout(remaining)
                             .map_err(IsoTpError::CanError)?
-                            .ok_or(IsoTpError::Timeout)?;
+                        {
+                            Some(f) => f,
+                            None => continue,
+                        };
 
                         let cf = ts.into_frame();
                         if cf.id() != self.config.rx_id {
@@ -258,11 +264,14 @@ where
                 return Err(IsoTpError::Timeout);
             }
 
-            let ts_frame = self
+            let ts_frame = match self
                 .channel
                 .receive_timeout(remaining)
                 .map_err(IsoTpError::CanError)?
-                .ok_or(IsoTpError::Timeout)?;
+            {
+                Some(f) => f,
+                None => continue,
+            };
 
             let can_frame = ts_frame.into_frame();
             if can_frame.id() != self.config.rx_id {
