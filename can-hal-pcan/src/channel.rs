@@ -140,6 +140,11 @@ impl Receive for PcanChannel {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<Timestamped<CanFrame, Instant>>, Self::Error> {
+        // Cap poll interval to avoid missing frames when the event fd is
+        // edge-triggered: the signal from an earlier frame (e.g. a TX echo)
+        // can mask the arrival of a later frame.
+        const MAX_POLL: Duration = Duration::from_millis(50);
+
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(frame) = self.read_classic()? {
@@ -149,14 +154,8 @@ impl Receive for PcanChannel {
             if now >= deadline {
                 return Ok(None);
             }
-            let signaled = self.event.wait(Some(deadline - now))?;
-            if !signaled {
-                // Timed out — try one last read in case a message arrived
-                // between the read and the wait.
-                return Ok(self
-                    .read_classic()?
-                    .map(|f| Timestamped::new(f, Instant::now())));
-            }
+            let wait_dur = (deadline - now).min(MAX_POLL);
+            let _ = self.event.wait(Some(wait_dur))?;
         }
     }
 }
