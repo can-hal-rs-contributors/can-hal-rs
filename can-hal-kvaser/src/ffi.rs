@@ -33,7 +33,7 @@ pub const CAN_FILTER_SET_CODE_EXT: u32 = 5;
 pub const CAN_FILTER_SET_MASK_EXT: u32 = 6;
 
 // canIoCtl function codes
-pub const CAN_IOCTL_GET_EVENTHANDLE: u32 = 6;
+pub const CAN_IOCTL_GET_EVENTHANDLE: u32 = 14;
 
 // Function pointer types for dynamically loaded CANlib symbols.
 //
