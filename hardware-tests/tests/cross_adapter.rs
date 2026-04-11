@@ -218,6 +218,20 @@ fn isotp_transfer_kvaser_to_pcan(payload: &[u8]) {
     assert_eq!(received, payload_expected, "Payload mismatch");
 }
 
+// --- Standalone channel open (no threading) ---
+
+#[test]
+fn test_kvaser_open_no_thread() {
+    let driver = can_hal_kvaser::KvaserDriver::new().unwrap();
+    let _channel = driver
+        .channel(0)
+        .unwrap()
+        .bitrate(500_000)
+        .unwrap()
+        .connect()
+        .expect("Kvaser channel open failed");
+}
+
 // --- PCAN -> Kvaser ---
 
 #[test]
