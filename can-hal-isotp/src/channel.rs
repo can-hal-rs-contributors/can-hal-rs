@@ -257,10 +257,12 @@ where
         let overhead = self.config.overhead();
         let deadline = Instant::now() + self.config.timeout;
         let mut wait_count: u8 = 0;
+        let mut none_count: u32 = 0;
 
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
+                eprintln!("[wait_for_fc] TIMEOUT after {none_count} empty polls");
                 return Err(IsoTpError::Timeout);
             }
 
@@ -270,10 +272,15 @@ where
                 .map_err(IsoTpError::CanError)?
             {
                 Some(f) => f,
-                None => continue,
+                None => {
+                    none_count += 1;
+                    continue;
+                }
             };
 
             let can_frame = ts_frame.into_frame();
+            eprintln!("[wait_for_fc] got frame id=0x{:X} data={:02X?}, expecting rx_id=0x{:X}",
+                can_frame.id().as_raw(), can_frame.data(), self.config.rx_id.as_raw());
             if can_frame.id() != self.config.rx_id {
                 continue;
             }
