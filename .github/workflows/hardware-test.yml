@@ -120,7 +120,7 @@ jobs:
       - name: Bind USB devices to host drivers
         run: |
           systemctl start can-usb-bind
-          sleep 5
+          sleep 15
 
       - name: Run hardware tests
         run: cargo test -p hardware-tests -- --test-threads=1
