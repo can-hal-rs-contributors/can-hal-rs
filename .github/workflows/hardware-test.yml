@@ -125,17 +125,6 @@ jobs:
       - name: Run hardware tests
         run: cargo test -p hardware-tests -- --test-threads=1
 
-      - name: Release USB devices for next CI run
-        if: always()
-        run: |
-          # Unbind devices from host drivers so the next CI run starts clean.
-          # The pcan chardev driver hides USB devices after rmmod, so we
-          # PCI-rescan the USB controllers to force re-enumeration.
-          rmmod mhydra kvcommon pcan 2>/dev/null || true
-          sleep 1
-          echo 1 > /sys/bus/pci/rescan 2>/dev/null || true
-          sleep 2
-
       - name: Report result
         if: always()
         uses: actions/github-script@v8
