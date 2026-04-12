@@ -1,6 +1,6 @@
 [package]
-name = "can-hal"
-version = "0.2.0"
+name = "can-hal-rs"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.81"
 description = "Hardware-agnostic traits for CAN bus communication"
@@ -9,6 +9,9 @@ readme = "README.md"
 repository = "https://github.com/Dolphindalt/can-hal-rs"
 keywords = ["can", "can-bus", "hal", "canfd", "automotive"]
 categories = ["hardware-support", "embedded", "no-std"]
+
+[lib]
+name = "can_hal"
 
 [features]
 default = ["std"]

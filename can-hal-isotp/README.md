@@ -1,6 +1,6 @@
 # can-hal-isotp
 
-ISO-TP (ISO 15765-2) transport layer for [`can-hal`](https://crates.io/crates/can-hal).
+ISO-TP (ISO 15765-2) transport layer for [`can-hal-rs`](https://crates.io/crates/can-hal-rs).
 
 Provides segmentation and reassembly of payloads larger than a single CAN frame,
 using the Single Frame / First Frame / Consecutive Frame / Flow Control protocol.

@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-can-hal = { path = "../can-hal" }
+can-hal = { path = "../can-hal", package = "can-hal-rs" }
 can-hal-pcan = { path = "../can-hal-pcan" }
 can-hal-kvaser = { path = "../can-hal-kvaser" }
 can-hal-isotp = { path = "../can-hal-isotp" }

@@ -1,6 +1,6 @@
 # can-hal-pcan
 
-PCAN-Basic backend for [`can-hal`](https://crates.io/crates/can-hal).
+PCAN-Basic backend for [`can-hal-rs`](https://crates.io/crates/can-hal-rs).
 
 Implements `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, `BusStatus`, `Driver`, and `ChannelBuilder` using the PCAN-Basic API from Peak System.
 

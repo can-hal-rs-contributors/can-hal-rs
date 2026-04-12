@@ -1,6 +1,6 @@
 # can-hal-socketcan
 
-Linux SocketCAN backend for [`can-hal`](https://crates.io/crates/can-hal).
+Linux SocketCAN backend for [`can-hal-rs`](https://crates.io/crates/can-hal-rs).
 
 Implements `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, `Driver`, and `ChannelBuilder` using SocketCAN sockets.
 

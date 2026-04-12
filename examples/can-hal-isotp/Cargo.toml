@@ -1,6 +1,6 @@
 [package]
 name = "can-hal-isotp-examples"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 publish = false
 
@@ -36,7 +36,7 @@ can-hal-isotp = { path = "../../can-hal-isotp" }
 can-hal-socketcan = { path = "../../can-hal-socketcan" }
 can-hal-pcan = { path = "../../can-hal-pcan" }
 can-hal-kvaser = { path = "../../can-hal-kvaser" }
-can-hal = { path = "../../can-hal" }
+can-hal = { path = "../../can-hal", package = "can-hal-rs" }
 
 [dev-dependencies]
 libc = "0.2"

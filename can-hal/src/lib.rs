@@ -14,7 +14,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! can-hal = { version = "0.2", default-features = false }
+//! can-hal-rs = { version = "0.3", default-features = false }
 //! ```
 //!
 //! ## Quick start

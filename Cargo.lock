@@ -27,34 +27,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
-name = "can-hal"
-version = "0.2.0"
-
-[[package]]
 name = "can-hal-isotp"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
- "can-hal",
+ "can-hal-rs",
  "tokio",
 ]
 
 [[package]]
 name = "can-hal-isotp-examples"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
- "can-hal",
  "can-hal-isotp",
  "can-hal-kvaser",
  "can-hal-pcan",
+ "can-hal-rs",
  "can-hal-socketcan",
  "libc",
 ]
 
 [[package]]
 name = "can-hal-kvaser"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
- "can-hal",
+ "can-hal-rs",
  "libc",
  "libloading",
  "windows-sys 0.59.0",
@@ -64,15 +60,15 @@ dependencies = [
 name = "can-hal-kvaser-examples"
 version = "0.0.0"
 dependencies = [
- "can-hal",
  "can-hal-kvaser",
+ "can-hal-rs",
 ]
 
 [[package]]
 name = "can-hal-pcan"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
- "can-hal",
+ "can-hal-rs",
  "libc",
  "libloading",
  "windows-sys 0.59.0",
@@ -82,15 +78,19 @@ dependencies = [
 name = "can-hal-pcan-examples"
 version = "0.0.0"
 dependencies = [
- "can-hal",
  "can-hal-pcan",
+ "can-hal-rs",
 ]
 
 [[package]]
+name = "can-hal-rs"
+version = "0.3.0"
+
+[[package]]
 name = "can-hal-socketcan"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
- "can-hal",
+ "can-hal-rs",
  "socketcan",
 ]
 
@@ -98,7 +98,7 @@ dependencies = [
 name = "can-hal-socketcan-examples"
 version = "0.0.0"
 dependencies = [
- "can-hal",
+ "can-hal-rs",
  "can-hal-socketcan",
 ]
 
@@ -143,10 +143,10 @@ dependencies = [
 name = "hardware-tests"
 version = "0.0.0"
 dependencies = [
- "can-hal",
  "can-hal-isotp",
  "can-hal-kvaser",
  "can-hal-pcan",
+ "can-hal-rs",
 ]
 
 [[package]]

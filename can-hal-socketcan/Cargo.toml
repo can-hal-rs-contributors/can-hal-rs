@@ -1,9 +1,9 @@
 [package]
 name = "can-hal-socketcan"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.81"
-description = "SocketCAN backend for can-hal traits (Linux)"
+description = "SocketCAN backend for can-hal-rs traits (Linux)"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/Dolphindalt/can-hal-rs"
@@ -11,5 +11,5 @@ keywords = ["can", "can-bus", "socketcan", "canfd", "linux"]
 categories = ["hardware-support", "os::linux-apis"]
 
 [dependencies]
-can-hal = { version = "0.2.0", path = "../can-hal" }
+can-hal = { version = "0.3.0", path = "../can-hal", package = "can-hal-rs" }
 socketcan = "3.5"
