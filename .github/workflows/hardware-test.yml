@@ -1,80 +1,22 @@
 name: Hardware Tests
 
 on:
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
 
 permissions:
-  issues: write
-  pull-requests: write
   contents: read
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check-permission:
-    name: Check permission
-    if: >-
-      github.event.issue.pull_request &&
-      startsWith(github.event.comment.body, '/test')
-    runs-on: ubuntu-latest
-    outputs:
-      authorized: ${{ steps.check.outputs.authorized }}
-      head_sha: ${{ steps.pr.outputs.head_sha }}
-    steps:
-      - name: Check commenter permission
-        id: check
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              username: context.payload.comment.user.login,
-            });
-            const authorized = ['admin', 'write'].includes(data.permission);
-            core.setOutput('authorized', authorized.toString());
-            if (!authorized) {
-              core.warning(`User ${context.payload.comment.user.login} does not have write access.`);
-            }
-
-      - name: Add reaction
-        if: steps.check.outputs.authorized == 'true'
-        uses: actions/github-script@v8
-        with:
-          script: |
-            await github.rest.reactions.createForIssueComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: context.payload.comment.id,
-              content: 'eyes',
-            });
-
-      - name: Get PR details
-        id: pr
-        if: steps.check.outputs.authorized == 'true'
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const { data } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-            });
-            core.setOutput('head_sha', data.head.sha);
-
   # Windows tests run FIRST — USB devices are free at boot (not bound to
   # host drivers). After Windows tests, ci-usb-to-host binds them for Linux.
   windows-hardware-tests:
     name: Windows hardware tests
-    needs: check-permission
-    if: needs.check-permission.outputs.authorized == 'true'
     runs-on: [self-hosted, nixos, can-bus]
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.check-permission.outputs.head_sha }}
 
       - name: Start Windows VM
         run: ci-vm-start
@@ -109,30 +51,10 @@ jobs:
 
   linux-hardware-tests:
     name: Linux hardware tests
-    needs: [check-permission, windows-hardware-tests]
-    if: needs.check-permission.outputs.authorized == 'true'
+    needs: windows-hardware-tests
     runs-on: [self-hosted, nixos, can-bus]
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.check-permission.outputs.head_sha }}
 
       - name: Run hardware tests
         run: cargo test -p hardware-tests -- --test-threads=1
-
-      - name: Report result
-        if: always()
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const status = '${{ job.status }}' === 'success' ? ':white_check_mark:' : ':x:';
-            const body = `${status} **Hardware tests ${('${{ job.status }}')}**\n\n` +
-              `- Windows tests: ${{ needs.windows-hardware-tests.result }}\n` +
-              `- Linux tests: ${{ job.status }}\n\n` +
-              `Commit: ${{ needs.check-permission.outputs.head_sha }}`;
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: body,
-            });
