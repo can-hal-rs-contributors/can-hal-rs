@@ -1,6 +1,18 @@
-# can-hal-pcan
+<div align="center">
+  <h1>can-hal-pcan</h1>
+  <p>
+    <strong>PCAN-Basic backend for <a href="https://crates.io/crates/can-hal-rs">can-hal-rs</a></strong>
+  </p>
+  <p>
 
-PCAN-Basic backend for [`can-hal-rs`](https://crates.io/crates/can-hal-rs).
+[![crates.io](https://img.shields.io/crates/v/can-hal-pcan?label=latest)](https://crates.io/crates/can-hal-pcan)
+[![Documentation](https://docs.rs/can-hal-pcan/badge.svg)](https://docs.rs/can-hal-pcan)
+![Minimum Supported Rust Version](https://img.shields.io/badge/rustc-1.81+-ab6000.svg)
+![License](https://img.shields.io/crates/l/can-hal-pcan.svg)
+[![CI](https://github.com/Dolphindalt/can-hal-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/Dolphindalt/can-hal-rs/actions/workflows/ci.yml)
+
+  </p>
+</div>
 
 Implements `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, `BusStatus`, `Driver`, and `ChannelBuilder` using the PCAN-Basic API from Peak System.
 

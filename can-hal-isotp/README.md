@@ -1,6 +1,18 @@
-# can-hal-isotp
+<div align="center">
+  <h1>can-hal-isotp</h1>
+  <p>
+    <strong>ISO-TP (ISO 15765-2) transport layer for <a href="https://crates.io/crates/can-hal-rs">can-hal-rs</a></strong>
+  </p>
+  <p>
 
-ISO-TP (ISO 15765-2) transport layer for [`can-hal-rs`](https://crates.io/crates/can-hal-rs).
+[![crates.io](https://img.shields.io/crates/v/can-hal-isotp?label=latest)](https://crates.io/crates/can-hal-isotp)
+[![Documentation](https://docs.rs/can-hal-isotp/badge.svg)](https://docs.rs/can-hal-isotp)
+![Minimum Supported Rust Version](https://img.shields.io/badge/rustc-1.81+-ab6000.svg)
+![License](https://img.shields.io/crates/l/can-hal-isotp.svg)
+[![CI](https://github.com/Dolphindalt/can-hal-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/Dolphindalt/can-hal-rs/actions/workflows/ci.yml)
+
+  </p>
+</div>
 
 Provides segmentation and reassembly of payloads larger than a single CAN frame,
 using the Single Frame / First Frame / Consecutive Frame / Flow Control protocol.

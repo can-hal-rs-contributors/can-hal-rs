@@ -1,8 +1,20 @@
-# can-hal
+<div align="center">
+  <h1>can-hal</h1>
+  <p>
+    <strong>Hardware-agnostic CAN bus traits for Rust</strong>
+  </p>
+  <p>
+
+[![CI](https://github.com/Dolphindalt/can-hal-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/Dolphindalt/can-hal-rs/actions/workflows/ci.yml)
+![Minimum Supported Rust Version](https://img.shields.io/badge/rustc-1.81+-ab6000.svg)
+![License](https://img.shields.io/crates/l/can-hal-rs.svg)
+
+  </p>
+</div>
 
 > **Warning:** These crates are unstable and under active development. APIs may change without notice. Not yet recommended for production use.
 
-Hardware-agnostic CAN bus traits for Rust, with backend implementations for Linux SocketCAN, PEAK PCAN, and KVASER adapters. The core `can-hal-rs` traits crate is `no_std`-compatible.
+Backend implementations for Linux SocketCAN, PEAK PCAN, and KVASER adapters. The core `can-hal-rs` traits crate is `no_std`-compatible.
 
 ## Crates
 

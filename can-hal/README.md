@@ -1,6 +1,18 @@
-# can-hal
+<div align="center">
+  <h1>can-hal-rs</h1>
+  <p>
+    <strong>Hardware-agnostic traits for CAN bus communication in Rust</strong>
+  </p>
+  <p>
 
-Hardware-agnostic traits for CAN bus communication in Rust.
+[![crates.io](https://img.shields.io/crates/v/can-hal-rs?label=latest)](https://crates.io/crates/can-hal-rs)
+[![Documentation](https://docs.rs/can-hal-rs/badge.svg)](https://docs.rs/can-hal-rs)
+![Minimum Supported Rust Version](https://img.shields.io/badge/rustc-1.81+-ab6000.svg)
+![License](https://img.shields.io/crates/l/can-hal-rs.svg)
+[![CI](https://github.com/Dolphindalt/can-hal-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/Dolphindalt/can-hal-rs/actions/workflows/ci.yml)
+
+  </p>
+</div>
 
 `can-hal-rs` defines the interface. Backend crates implement it. Application code is portable across CAN hardware.
 
