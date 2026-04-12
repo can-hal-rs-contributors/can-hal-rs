@@ -120,7 +120,16 @@ jobs:
       - name: Bind USB devices to host drivers
         run: |
           systemctl start can-usb-bind
-          sleep 30
+          echo "Waiting for PCAN device..."
+          for i in $(seq 1 60); do
+            if grep -q "usbfd" /proc/pcan 2>/dev/null; then
+              echo "PCAN ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          cat /proc/pcan
+          sleep 5
 
       - name: Run hardware tests
         run: cargo test -p hardware-tests -- --test-threads=1
