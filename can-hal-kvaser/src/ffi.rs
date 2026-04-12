@@ -33,6 +33,11 @@ pub const CAN_FILTER_SET_CODE_EXT: u32 = 5;
 pub const CAN_FILTER_SET_MASK_EXT: u32 = 6;
 
 // canIoCtl function codes
+// linuxcan SDK defines canIOCTL_GET_EVENTHANDLE = 6,
+// Windows CANlib SDK defines it as 14.
+#[cfg(not(target_os = "windows"))]
+pub const CAN_IOCTL_GET_EVENTHANDLE: u32 = 6;
+#[cfg(target_os = "windows")]
 pub const CAN_IOCTL_GET_EVENTHANDLE: u32 = 14;
 
 // Function pointer types for dynamically loaded CANlib symbols.
