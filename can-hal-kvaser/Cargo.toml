@@ -2,6 +2,7 @@
 name = "can-hal-kvaser"
 version = "0.2.0"
 edition = "2021"
+rust-version = "1.81"
 description = "KVASER CANlib backend for can-hal traits (Windows and Linux)"
 license = "MIT OR Apache-2.0"
 readme = "README.md"

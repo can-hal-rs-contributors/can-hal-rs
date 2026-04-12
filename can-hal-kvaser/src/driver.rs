@@ -396,7 +396,7 @@ fn to_data_tq(bitrate_hz: u32, p: &BusParamsFd) -> Result<KvBusParamsTq, KvaserE
 /// TQ count at an 80 MHz clock.
 fn compute_prescaler(bitrate_hz: u32, tq: u32) -> Result<i32, KvaserError> {
     let bit_time = (bitrate_hz as u64) * (tq as u64);
-    if bit_time == 0 || !(CLOCK_HZ as u64).is_multiple_of(bit_time) {
+    if bit_time == 0 || (CLOCK_HZ as u64) % bit_time != 0 {
         return Err(KvaserError::NotSupported(format!(
             "cannot achieve {bitrate_hz} Hz with {tq} TQ at {CLOCK_HZ} Hz clock \
              (prescaler would be non-integer)"
