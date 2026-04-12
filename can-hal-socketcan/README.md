@@ -1,6 +1,18 @@
-# can-hal-socketcan
+<div align="center">
+  <h1>can-hal-socketcan</h1>
+  <p>
+    <strong>Linux SocketCAN backend for <a href="https://crates.io/crates/can-hal-rs">can-hal-rs</a></strong>
+  </p>
+  <p>
 
-Linux SocketCAN backend for [`can-hal-rs`](https://crates.io/crates/can-hal-rs).
+[![crates.io](https://img.shields.io/crates/v/can-hal-socketcan?label=latest)](https://crates.io/crates/can-hal-socketcan)
+[![Documentation](https://docs.rs/can-hal-socketcan/badge.svg)](https://docs.rs/can-hal-socketcan)
+![Minimum Supported Rust Version](https://img.shields.io/badge/rustc-1.81+-ab6000.svg)
+![License](https://img.shields.io/crates/l/can-hal-socketcan.svg)
+[![CI](https://github.com/Dolphindalt/can-hal-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/Dolphindalt/can-hal-rs/actions/workflows/ci.yml)
+
+  </p>
+</div>
 
 Implements `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, `Driver`, and `ChannelBuilder` using SocketCAN sockets.
 
