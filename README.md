@@ -2,13 +2,13 @@
 
 > **Warning:** These crates are unstable and under active development. APIs may change without notice. Not yet recommended for production use.
 
-Hardware-agnostic CAN bus traits for Rust, with backend implementations for Linux SocketCAN, PEAK PCAN, and KVASER adapters. The core `can-hal` traits crate is `no_std`-compatible.
+Hardware-agnostic CAN bus traits for Rust, with backend implementations for Linux SocketCAN, PEAK PCAN, and KVASER adapters. The core `can-hal-rs` traits crate is `no_std`-compatible.
 
 ## Crates
 
 | Crate | Description |
 |---|---|
-| [`can-hal`](can-hal/) | Core traits: `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Driver`, `ChannelBuilder`, `Filterable`, `BusStatus` |
+| [`can-hal-rs`](can-hal/) | Core traits: `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Driver`, `ChannelBuilder`, `Filterable`, `BusStatus` |
 | [`can-hal-socketcan`](can-hal-socketcan/) | Linux SocketCAN backend |
 | [`can-hal-pcan`](can-hal-pcan/) | PEAK PCAN-Basic backend (Windows and Linux) |
 | [`can-hal-kvaser`](can-hal-kvaser/) | KVASER CANlib backend (Windows and Linux) |
@@ -44,7 +44,7 @@ let mut channel = driver.channel(0)?.bitrate(500_000)?.connect()?;
 
 ## ISO-TP
 
-Send and receive multi-frame payloads over any `can-hal` backend:
+Send and receive multi-frame payloads over any `can-hal-rs` backend:
 
 ```rust
 use can_hal::CanId;

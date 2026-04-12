@@ -2,7 +2,7 @@
 
 Hardware-agnostic traits for CAN bus communication in Rust.
 
-`can-hal` defines the interface. Backend crates implement it. Application code is portable across CAN hardware.
+`can-hal-rs` defines the interface. Backend crates implement it. Application code is portable across CAN hardware.
 
 ## `no_std` support
 
@@ -10,7 +10,7 @@ This crate is `no_std`-compatible (requires Rust 1.81+). The `std` feature is en
 
 ```toml
 [dependencies]
-can-hal = { version = "0.2", default-features = false }
+can-hal-rs = { version = "0.3", default-features = false }
 ```
 
 ## Traits

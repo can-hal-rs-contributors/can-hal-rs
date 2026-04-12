@@ -1,6 +1,6 @@
 # can-hal-kvaser
 
-KVASER CANlib backend for [`can-hal`](https://crates.io/crates/can-hal).
+KVASER CANlib backend for [`can-hal-rs`](https://crates.io/crates/can-hal-rs).
 
 Implements `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, `BusStatus`, `Driver`, and `ChannelBuilder` using the CANlib API from KVASER.
 
