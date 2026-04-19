@@ -1,6 +1,6 @@
 [package]
 name = "can-hal-isotp"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 rust-version = "1.81"
 description = "ISO-TP (ISO 15765-2) transport layer for can-hal-rs"
@@ -17,7 +17,7 @@ workspace = true
 async = ["can-hal/async", "dep:tokio"]
 
 [dependencies]
-can-hal = { version = "0.3.2", path = "../can-hal", package = "can-hal-rs" }
+can-hal = { version = "0.3.3", path = "../can-hal", package = "can-hal-rs" }
 tokio = { version = "1", features = ["time"], optional = true }
 
 [dev-dependencies]

@@ -1,6 +1,6 @@
 [package]
 name = "can-hal-kvaser"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 rust-version = "1.81"
 description = "KVASER CANlib backend for can-hal-rs traits (Windows and Linux)"
@@ -14,7 +14,7 @@ categories = ["hardware-support"]
 workspace = true
 
 [dependencies]
-can-hal = { version = "0.3.2", path = "../can-hal", package = "can-hal-rs" }
+can-hal = { version = "0.3.3", path = "../can-hal", package = "can-hal-rs" }
 libloading = "0.8"
 
 [target.'cfg(unix)'.dependencies]

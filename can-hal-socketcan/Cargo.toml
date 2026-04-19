@@ -1,6 +1,6 @@
 [package]
 name = "can-hal-socketcan"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 rust-version = "1.81"
 description = "SocketCAN backend for can-hal-rs traits (Linux)"
@@ -14,5 +14,5 @@ categories = ["hardware-support", "os::linux-apis"]
 workspace = true
 
 [dependencies]
-can-hal = { version = "0.3.2", path = "../can-hal", package = "can-hal-rs" }
+can-hal = { version = "0.3.3", path = "../can-hal", package = "can-hal-rs" }
 socketcan = "3.5"
