@@ -2,6 +2,8 @@ name: Hardware Tests
 
 on:
   workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
@@ -14,6 +16,11 @@ jobs:
   # host drivers). After Windows tests, ci-usb-to-host binds them for Linux.
   windows-hardware-tests:
     name: Windows hardware tests
+    # Always run on workflow_dispatch; on PRs, only run when the
+    # `run-hardware-tests` label is present (self-hosted runner is scarce).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'run-hardware-tests')
     runs-on: [self-hosted, nixos, can-bus]
     steps:
       - uses: actions/checkout@v6
@@ -57,6 +64,9 @@ jobs:
   linux-hardware-tests:
     name: Linux hardware tests
     needs: windows-hardware-tests
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'run-hardware-tests')
     runs-on: [self-hosted, nixos, can-bus]
     steps:
       - uses: actions/checkout@v6
