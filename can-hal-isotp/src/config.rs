@@ -77,7 +77,7 @@ impl IsoTpConfig {
             addressing: AddressingMode::Normal,
             block_size: 0,
             st_min: 5,
-            timeout: Duration::from_millis(1000),
+            timeout: Duration::from_secs(1),
             padding: Some(0xCC),
             max_fc_wait: 10,
             functional_id: None,

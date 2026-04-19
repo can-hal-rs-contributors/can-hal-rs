@@ -283,7 +283,7 @@ impl ChannelBuilder for PcanChannelBuilder {
         } else if let Some(data_hz) = self.data_bitrate {
             let nominal_hz = self.bitrate_hz.ok_or(PcanError::UnsupportedBitrate(0))?;
             let timing = build_fd_timing_string(nominal_hz, data_hz)
-                .ok_or_else(|| PcanError::UnsupportedBitrate(data_hz))?;
+                .ok_or(PcanError::UnsupportedBitrate(data_hz))?;
             Some(timing)
         } else {
             None
