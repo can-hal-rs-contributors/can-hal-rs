@@ -9,7 +9,7 @@
 [![Documentation](https://docs.rs/can-hal-isotp/badge.svg)](https://docs.rs/can-hal-isotp)
 ![Minimum Supported Rust Version](https://img.shields.io/badge/rustc-1.81+-ab6000.svg)
 ![License](https://img.shields.io/crates/l/can-hal-isotp.svg)
-[![CI](https://github.com/Dolphindalt/can-hal-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/Dolphindalt/can-hal-rs/actions/workflows/ci.yml)
+[![CI](https://github.com/can-hal-rs-contributors/can-hal-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/can-hal-rs-contributors/can-hal-rs/actions/workflows/ci.yml)
 
   </p>
 </div>

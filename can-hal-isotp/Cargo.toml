@@ -1,12 +1,12 @@
 [package]
 name = "can-hal-isotp"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 rust-version = "1.81"
 description = "ISO-TP (ISO 15765-2) transport layer for can-hal-rs"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/Dolphindalt/can-hal-rs"
+repository = "https://github.com/can-hal-rs-contributors/can-hal-rs"
 keywords = ["can", "isotp", "automotive", "uds"]
 categories = ["hardware-support"]
 
@@ -17,7 +17,7 @@ workspace = true
 async = ["can-hal/async", "dep:tokio"]
 
 [dependencies]
-can-hal = { version = "0.3.3", path = "../can-hal", package = "can-hal-rs" }
+can-hal = { version = "0.3.4", path = "../can-hal", package = "can-hal-rs" }
 tokio = { version = "1", features = ["time"], optional = true }
 
 [dev-dependencies]
