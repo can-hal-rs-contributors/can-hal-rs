@@ -44,10 +44,10 @@ Classic bitrate is a `ClassicBitrate` enum so invalid values aren't representabl
 
 ## CAN FD
 
-`.fd(nominal_hz, data_hz)` validates that both bitrates evenly divide the 80 MHz PCAN clock; on success the builder transitions to FD state and exposes sample-point overrides. Defaults are 70% nominal and 80% data; override via `.sample_point()` / `.data_sample_point()`:
+`.fd(nominal_hz, data_hz)` validates that both bitrates evenly divide the 80 MHz PCAN clock; on success the builder transitions to FD state and exposes sample-point overrides. Defaults are 70% nominal and 80% data; override via `.sample_point()` / `.data_sample_point()` with a `SamplePoint` value:
 
 ```rust,no_run
-use can_hal::{TransmitFd, CanId, CanFdFrame};
+use can_hal::{SamplePoint, TransmitFd, CanId, CanFdFrame};
 use can_hal_pcan::PcanDriver;
 
 let driver = PcanDriver::new().unwrap();
@@ -56,12 +56,12 @@ let mut channel = driver
     .unwrap()
     .fd(500_000, 4_000_000)
     .unwrap()
-    .sample_point(0.75)
+    .sample_point(SamplePoint::PCT_75)
     .connect()
     .unwrap();
 ```
 
-For raw control over per-segment timing, use `fd_timing()` with a `PcanFdTiming` value (e.g., for unusually large SJW values).
+For raw control over per-segment timing, transition straight from `<Initial>` to `<FdExplicit>` via `.fd_explicit(PcanFdTiming)` (e.g., for unusually large SJW values).
 
 ## Prerequisites
 

@@ -7,10 +7,10 @@ enum InterfaceSpec {
     Name(String),
 }
 
-/// SocketCAN driver — factory for opening CAN channels.
+/// SocketCAN driver - factory for opening CAN channels.
 ///
 /// SocketCAN bitrate, sample point, and FD timing are configured at the OS
-/// level via `ip link set` or netlink — not through the socket API — so this
+/// level via `ip link set` or netlink - not through the socket API - so this
 /// builder intentionally has no timing methods. Configure the interface
 /// before calling [`connect`](SocketCanChannelBuilder::connect):
 ///
@@ -64,7 +64,7 @@ impl Default for SocketCanDriver {
 /// Builder for opening a SocketCAN channel.
 ///
 /// SocketCAN bitrate is OS-managed, so this builder only chooses the
-/// interface — there are deliberately no methods to set bitrate, sample
+/// interface - there are deliberately no methods to set bitrate, sample
 /// point, or FD timing.
 pub struct SocketCanChannelBuilder {
     interface: InterfaceSpec,

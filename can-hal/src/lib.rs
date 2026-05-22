@@ -39,6 +39,7 @@ pub mod error;
 pub mod filter;
 pub mod frame;
 pub mod id;
+pub mod timing;
 
 #[cfg(feature = "async")]
 pub mod async_channel;
@@ -50,6 +51,7 @@ pub use error::CanError;
 pub use filter::{Filter, Filterable};
 pub use frame::{CanFdFrame, CanFrame, Frame, Timestamped};
 pub use id::CanId;
+pub use timing::SamplePoint;
 
 #[cfg(feature = "async")]
 pub use async_channel::{AsyncReceive, AsyncReceiveFd, AsyncTransmit, AsyncTransmitFd};

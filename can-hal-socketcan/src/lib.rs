@@ -27,7 +27,7 @@
 //! # Bitrate Configuration
 //!
 //! SocketCAN bitrate is configured at the OS level, not through the socket
-//! API — the builder deliberately has no timing methods. Use `ip link set`
+//! API - the builder deliberately has no timing methods. Use `ip link set`
 //! or netlink before opening a channel:
 //!
 //! ```bash

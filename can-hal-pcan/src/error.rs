@@ -67,8 +67,8 @@ pub enum PcanError {
     /// The requested bitrate is not a standard PCAN-Basic bitrate.
     UnsupportedBitrate(u32),
     /// No FD timing parameters satisfy the requested bitrate + sample point
-    /// at the 80 MHz PCAN clock, or builder state is incomplete (e.g.,
-    /// `data_bitrate()` set without `bitrate()`).
+    /// at the 80 MHz PCAN clock (e.g., a nominal or data bitrate that does
+    /// not evenly divide the clock).
     UnsupportedTiming(String),
     /// A platform-specific error (e.g., event creation failed).
     Platform(String),

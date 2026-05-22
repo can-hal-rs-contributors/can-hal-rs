@@ -4,12 +4,12 @@
 //!
 //! Provides [`PcanDriver`] and [`PcanChannel<Mode>`] which implement the
 //! hardware-agnostic channel traits defined in `can-hal`. The channel is
-//! parameterized on a type-state marker — [`mode::Classic`] or
-//! [`mode::Fd`] — so invalid combinations (e.g., calling `transmit_fd` on a
+//! parameterized on a type-state marker - [`mode::Classic`] or
+//! [`mode::Fd`] - so invalid combinations (e.g., calling `transmit_fd` on a
 //! classic channel) are compile errors, not runtime ones.
 //!
 //! The PCAN-Basic library (`PCANBasic.dll` on Windows, `libpcanbasic.so` on
-//! Linux) is loaded dynamically at runtime — no compile-time link is required.
+//! Linux) is loaded dynamically at runtime - no compile-time link is required.
 //!
 //! # Classic CAN example
 //!
@@ -31,9 +31,8 @@
 //! # CAN FD example
 //!
 //! Sample points default to 70% (nominal) and 80% (data). Override with
-//! [`sample_point`](PcanChannelBuilder::sample_point) /
-//! [`data_sample_point`](PcanChannelBuilder::data_sample_point); for raw
-//! per-segment control use [`fd_timing`](PcanChannelBuilder::fd_timing) with
+//! `sample_point()` / `data_sample_point()` on the FD-mode builder; for raw
+//! per-segment control use `PcanChannelBuilder::<Initial>::fd_explicit` with
 //! a [`PcanFdTiming`] value.
 //!
 //! ```rust,ignore
@@ -78,7 +77,7 @@ pub use driver::{
     PCAN_CLOCK_HZ,
 };
 pub use error::PcanError;
-pub use mode::{Classic, Fd, Initial};
+pub use mode::{Classic, Fd, FdExplicit, Initial};
 
 // Compile-time assertion: both channel modes must be Send so they can be moved across threads.
 const _: fn() = || {

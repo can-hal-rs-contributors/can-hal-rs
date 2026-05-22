@@ -143,7 +143,7 @@ impl ReceiveEvent {
 }
 
 // SAFETY: On Windows the HANDLE is an opaque kernel object that is safe to send
-// across threads. On Unix the fd is a plain integer — also Send-safe.
+// across threads. On Unix the fd is a plain integer - also Send-safe.
 unsafe impl Send for ReceiveEvent {}
 
-// The event handle / fd is owned by the CANlib driver — no cleanup needed.
+// The event handle / fd is owned by the CANlib driver - no cleanup needed.

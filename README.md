@@ -20,38 +20,48 @@ Backend implementations for Linux SocketCAN, PEAK PCAN, and KVASER adapters. The
 
 | Crate | Description |
 |---|---|
-| [`can-hal-rs`](can-hal/) | Core traits: `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Driver`, `ChannelBuilder`, `Filterable`, `BusStatus` |
+| [`can-hal-rs`](can-hal/) | Core traits: `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, `BusStatus` |
 | [`can-hal-socketcan`](can-hal-socketcan/) | Linux SocketCAN backend |
 | [`can-hal-pcan`](can-hal-pcan/) | PEAK PCAN-Basic backend (Windows and Linux) |
 | [`can-hal-kvaser`](can-hal-kvaser/) | KVASER CANlib backend (Windows and Linux) |
 | [`can-hal-isotp`](can-hal-isotp/) | ISO-TP (ISO 15765-2) transport layer |
 
+Each backend exposes a concrete driver with a typestate-driven builder: `.channel(idx)` returns an `Initial` state, then `.classic(...)` or `.fd(nominal, data)` transitions to a `Classic` or `Fd` state where only the methods valid for that mode are callable. Channels are likewise mode-parameterized - `PcanChannel<Classic>` implements `Transmit + Receive`; `PcanChannel<Fd>` implements `TransmitFd + ReceiveFd`. Invalid combinations are compile errors, not runtime errors.
+
 ## Example
 
 ```rust
-use can_hal::{CanId, CanFrame, Transmit, Receive, ChannelBuilder};
+use can_hal::{CanId, CanFrame, Transmit, Receive};
 use can_hal_socketcan::SocketCanDriver;
 
 let driver = SocketCanDriver::new();
-let mut channel = driver.channel_by_name("can0")?.bitrate(500_000)?.connect()?;
+let mut channel = driver.channel_by_name("can0").connect()?;
 
 let id = CanId::new_standard(0x100)?;
 let frame = CanFrame::new(id, &[0x01, 0x02, 0x03])?;
 channel.transmit(&frame)?;
 ```
 
-Switching backends requires only changing the driver:
+SocketCAN bitrate is OS-managed (`ip link set ... bitrate ...`). For PCAN, classic bitrate is a checked enum:
 
 ```rust
-use can_hal_pcan::PcanDriver;
+use can_hal_pcan::{PcanDriver, ClassicBitrate};
 let driver = PcanDriver::new()?;
-let mut channel = driver.channel(0)?.bitrate(500_000)?.connect()?;
+let mut channel = driver.channel(0)?.classic(ClassicBitrate::Br500K).connect()?;
 ```
+
+For Kvaser, classic bitrate is a `u32` validated against the 80 MHz CANlib clock:
 
 ```rust
 use can_hal_kvaser::KvaserDriver;
 let driver = KvaserDriver::new()?;
-let mut channel = driver.channel(0)?.bitrate(500_000)?.connect()?;
+let mut channel = driver.channel(0)?.classic(500_000)?.connect()?;
+```
+
+CAN FD on either hardware-backed crate:
+
+```rust
+let mut channel = driver.channel(0)?.fd(500_000, 4_000_000)?.connect()?;
 ```
 
 ## ISO-TP

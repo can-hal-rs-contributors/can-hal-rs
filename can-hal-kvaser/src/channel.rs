@@ -135,7 +135,7 @@ impl Receive for KvaserChannel<Classic> {
         loop {
             match self.read_frame()? {
                 Some(Frame::Can(f)) => return Ok(Timestamped::new(f, Instant::now())),
-                Some(Frame::Fd(_)) => {} // FD frame on classic receive — skip and retry
+                Some(Frame::Fd(_)) => {} // FD frame on classic receive - skip and retry
                 None => {
                     let _ = self.event.wait(Some(MAX_POLL_INTERVAL))?;
                 }

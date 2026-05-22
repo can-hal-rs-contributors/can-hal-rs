@@ -81,7 +81,7 @@ impl Receive for SocketCanChannel {
                 let frame = convert::from_socketcan_data_frame(&data_frame)?;
                 return Ok(Timestamped::new(frame, now));
             }
-            // Skip FD, remote, and error frames — caller wants classic only.
+            // Skip FD, remote, and error frames - caller wants classic only.
         }
     }
 

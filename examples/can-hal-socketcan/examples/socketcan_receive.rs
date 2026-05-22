@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             None => {
-                // Timeout, no frame received — keep waiting
+                // Timeout, no frame received - keep waiting
             }
         }
     }

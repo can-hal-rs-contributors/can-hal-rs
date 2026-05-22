@@ -4,8 +4,8 @@
 //!
 //! Loads `libcanlib.so` (Linux) or `canlib32.dll` (Windows) at runtime and
 //! provides [`KvaserDriver`] and [`KvaserChannel<Mode>`]. The channel is
-//! parameterized on a type-state marker — [`mode::Classic`] or
-//! [`mode::Fd`] — so invalid combinations are compile errors.
+//! parameterized on a type-state marker - [`mode::Classic`] or
+//! [`mode::Fd`] - so invalid combinations are compile errors.
 //!
 //! ## Classic CAN example
 //!
@@ -54,9 +54,9 @@ mod ffi;
 mod library;
 
 pub use channel::KvaserChannel;
-pub use driver::{BusParams, BusParamsFd, KvaserChannelBuilder, KvaserDriver, CLOCK_HZ};
+pub use driver::{BusParams, BusParamsFd, KvaserChannelBuilder, KvaserDriver, KVASER_CLOCK_HZ};
 pub use error::{KvaserError, KvaserStatus};
-pub use mode::{Classic, Fd, Initial};
+pub use mode::{Classic, ClassicExplicit, Fd, FdExplicit, Initial};
 
 // Compile-time assertion: both channel modes must be Send.
 const _: fn() = || {

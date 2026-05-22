@@ -30,7 +30,7 @@ impl Filter {
 ///
 /// **Important**: The exact semantics of multiple filters depend on the backend.
 /// Some hardware (e.g. SocketCAN) supports multiple independent filters
-/// (union — a frame passes if it matches *any* filter). Other hardware
+/// (union - a frame passes if it matches *any* filter). Other hardware
 /// (e.g. PCAN, Kvaser) only supports a single filter pair per frame type
 /// (standard / extended), so multiple filters must be merged into one, which
 /// may accept a broader range of IDs than intended.

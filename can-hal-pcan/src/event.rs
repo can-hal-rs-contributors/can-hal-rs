@@ -173,7 +173,7 @@ impl ReceiveEvent {
 }
 
 // SAFETY: On Windows the HANDLE is an opaque kernel object that is safe to send
-// across threads. On Unix the fd is a plain integer — also Send-safe.
+// across threads. On Unix the fd is a plain integer - also Send-safe.
 unsafe impl Send for ReceiveEvent {}
 
 impl Drop for ReceiveEvent {
@@ -198,7 +198,7 @@ impl Drop for ReceiveEvent {
                 windows_sys::Win32::Foundation::CloseHandle(self.event_handle);
             }
         }
-        // On Linux the fd is owned by the PCAN library — do not close it.
+        // On Linux the fd is owned by the PCAN library - do not close it.
         // Fields `lib`, `handle`, and `fd` are dropped implicitly; no cleanup needed.
         #[cfg(not(target_os = "windows"))]
         {

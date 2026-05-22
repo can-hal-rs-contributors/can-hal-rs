@@ -2,10 +2,10 @@
 //!
 //! [`PcanChannel`] wraps a PCAN-Basic channel handle and implements the
 //! `can-hal` traits for CAN communication. The channel is parameterized on
-//! a type-state marker — [`Classic`](crate::mode::Classic) or
-//! [`Fd`](crate::mode::Fd) — and only the trait impls valid for that mode
-//! are available, so calling `transmit_fd` on a classic channel is a
-//! compile error rather than a runtime `InvalidFrame`.
+//! a type-state marker - [`crate::mode::Classic`] or [`crate::mode::Fd`] -
+//! and only the trait impls valid for that mode are available, so calling
+//! `transmit_fd` on a classic channel is a compile error rather than a
+//! runtime `InvalidFrame`.
 
 use std::marker::PhantomData;
 use std::sync::Arc;

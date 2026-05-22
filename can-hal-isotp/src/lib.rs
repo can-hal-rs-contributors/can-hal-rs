@@ -11,10 +11,9 @@
 //! use can_hal::CanId;
 //! use can_hal_isotp::{IsoTpChannel, IsoTpConfig};
 //! use can_hal_socketcan::SocketCanDriver;
-//! use can_hal::{ChannelBuilder, Driver};
 //!
 //! let driver = SocketCanDriver::new();
-//! let channel = driver.channel_by_name("vcan0")?.bitrate(500_000)?.connect()?;
+//! let channel = driver.channel_by_name("vcan0").connect()?;
 //!
 //! let config = IsoTpConfig::new(
 //!     CanId::new_standard(0x7E0)?,
