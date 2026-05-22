@@ -145,13 +145,18 @@ impl PcanDriver {
         bus_type: PcanBusType,
         index: u32,
     ) -> Result<PcanChannelBuilder<Initial>, PcanError> {
+        // Validate against the documented range *before* the u16 cast, so an
+        // out-of-range value like 0x1_0000 is rejected rather than silently
+        // truncating to 0 and opening channel 0.
+        if index > 15 {
+            return Err(PcanError::InvalidChannel(index));
+        }
         let bus_code = match bus_type {
             PcanBusType::Usb => 0,
             PcanBusType::Pci => 1,
             PcanBusType::Lan => 2,
         };
-        // Channel index is 0..=15, so u32 -> u16 truncation cannot happen.
-        #[allow(clippy::cast_possible_truncation)]
+        #[allow(clippy::cast_possible_truncation)] // bounded by the check above
         let handle =
             ffi::pcan_handle(bus_code, index as u16).ok_or(PcanError::InvalidChannel(index))?;
 

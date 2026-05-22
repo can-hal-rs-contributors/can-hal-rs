@@ -798,14 +798,19 @@ mod tests {
     }
 
     #[test]
-    fn compute_prescaler_rejects_too_large() {
-        // Find a (bitrate, tq) where the integer prescaler would exceed i32::MAX.
-        // 80M / (1 * 1) = 80M (fits). Try bitrate=1, tq=1 -> prescaler=80M (fits).
-        // i32::MAX is ~2.1B, so we need clock / (bitrate * tq) > 2.1B. With
-        // clock=80M, that requires bitrate * tq < 80M / 2.1B < 1, impossible.
-        // Confirms the cast is safe under all valid inputs in practice. Still,
-        // assert the function returns the expected result at the boundary.
+    fn compute_prescaler_at_clock_boundary() {
+        // bitrate=clock, tq=1 -> prescaler=1, the lower bound of the range.
+        // Documents that the function is safe at the smallest valid prescaler.
         let r = compute_prescaler(80_000_000, 1).unwrap();
         assert_eq!(r, 1);
+    }
+
+    #[test]
+    fn compute_prescaler_rejects_above_max_prescaler() {
+        // 100 Hz nominal with tq=3 yields prescaler 80M / (100 * 3) ≈ 266,667,
+        // far above MAX_PRESCALER=1024. (Also non-integer here, so the
+        // divisibility check would catch it first - try an exact case:
+        // 100 Hz, tq=10 -> 80M / 1000 = 80,000 prescaler. Still above 1024.)
+        assert!(compute_prescaler(100, 10).is_err());
     }
 }
