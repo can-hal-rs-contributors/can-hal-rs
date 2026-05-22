@@ -65,16 +65,31 @@ any backend:
 |---|---|
 | `Transmit` / `Receive` | Send/receive classic CAN frames |
 | `TransmitFd` / `ReceiveFd` | Send/receive CAN FD frames (`ReceiveFd` returns `Frame` enum) |
-| `Driver` / `DriverFd` | Factory to open channels on hardware interfaces |
-| `ChannelBuilder` | Configure bitrate, sample point, etc. before going on-bus |
 | `Filterable` | Set/clear hardware acceptance filters |
 | `BusStatus` | Query bus state (ErrorActive/Passive/BusOff) and error counters |
 | `CanError` | Blanket trait: `Error + Send + Sync + 'static` |
 | `Async*` variants | Async versions of Transmit/Receive/TransmitFd/ReceiveFd (behind `async` feature) |
 
+There is no shared `Driver` or `ChannelBuilder` trait. Each backend exposes its own
+concrete driver type and a **typestate-driven builder**: an `Initial` state transitions
+to `Classic` or `Fd` via `.classic(...)` / `.fd(nominal, data)`, and only the methods
+valid for the current state are callable. Invalid combinations (e.g., `data_sample_point`
+in classic mode, `transmit_fd` on a classic channel) are compile errors, not runtime
+ones. Channels are likewise parameterized: `PcanChannel<Classic>` implements
+`Transmit + Receive`; `PcanChannel<Fd>` implements `TransmitFd + ReceiveFd`. Both
+implement `Filterable` and `BusStatus`.
+
 **Filter semantics vary by backend:** SocketCAN supports multiple independent filters
 (union semantics), while PCAN and Kvaser support a single ID+mask pair per frame type.
 Code that uses `Filterable` must be aware of this.
+
+### Builder API per backend
+
+| Backend | Classic | FD | Sample-point setters | Raw escape hatch |
+|---|---|---|---|---|
+| SocketCAN | `driver.channel_by_name(name).connect()?` (timing OS-managed) | n/a | n/a (no setters) | n/a |
+| PCAN | `driver.channel(0)?.classic(ClassicBitrate::Br500K).connect()?` (enum, infallible) | `driver.channel(0)?.fd(500_000, 4_000_000)?.connect()?` | `<Fd>` only | `fd_timing(PcanFdTiming)` on `<Fd>` |
+| Kvaser | `driver.channel(0)?.classic(500_000)?.connect()?` (u32, fallible via solver) | `driver.channel(0)?.fd(500_000, 4_000_000)?.connect()?` | both `<Classic>` and `<Fd>` | `bus_params(BusParams)` / `bus_params_fd(BusParamsFd)` |
 
 ## Build and Development
 
@@ -177,10 +192,17 @@ Timing parameters must match across all adapters on the same bus, or nodes will 
 
 ### Backend-Specific Timing Notes
 
-- **PCAN**: Uses `fd_timing_string()` on the builder. Clock is 80 MHz.
-- **Kvaser**: Requires explicit timing values. The `libcanlib.so.1` on Linux does **not**
-  accept predefined bitrate constants (negative frequency values like `-2` for 500K); these
-  return `canERR_PARAM`. Always pass explicit `freq_hz` + segment values.
+- **PCAN**: 80 MHz clock. The builder runs an internal solver that derives
+  `(brp, tseg1, tseg2, sjw)` from `bitrate()` + `data_bitrate()` plus optional
+  `sample_point()` / `data_sample_point()`. Sample points default to 70%
+  (nominal) and 80% (data). For raw control, use `fd_timing(PcanFdTiming)`.
+- **Kvaser**: 80 MHz clock. Same solver shape as PCAN; the builder honors
+  `sample_point()` / `data_sample_point()` and falls back to defaults
+  (70% / 80%) otherwise. For raw control, use `bus_params(BusParams)` /
+  `bus_params_fd(BusParamsFd)`. The `libcanlib.so.1` on Linux does **not**
+  accept predefined bitrate constants (negative frequency values like `-2`
+  for 500K); these return `canERR_PARAM`. Always pass explicit `freq_hz` +
+  segment values.
 - **SocketCAN**: Bitrate is configured at the OS level (`ip link set can0 type can
   bitrate 500000`), not through the socket API. The `bitrate()` builder method is a no-op
   for SocketCAN.

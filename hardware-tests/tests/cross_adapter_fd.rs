@@ -2,7 +2,6 @@ use std::thread;
 use std::time::Duration;
 
 use can_hal::CanId;
-use can_hal::{ChannelBuilder, Driver};
 use can_hal_isotp::{IsoTpConfig, IsoTpFdChannel};
 
 const TX_ID: u16 = 0x7E0;
@@ -19,9 +18,7 @@ fn isotp_fd_transfer_pcan_to_kvaser(payload: &[u8]) {
         let channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
-            .unwrap()
-            .data_bitrate(4_000_000)
+            .fd(500_000, 4_000_000)
             .unwrap()
             .connect()
             .unwrap();
@@ -38,9 +35,7 @@ fn isotp_fd_transfer_pcan_to_kvaser(payload: &[u8]) {
         let channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
-            .unwrap()
-            .data_bitrate(4_000_000)
+            .fd(500_000, 4_000_000)
             .unwrap()
             .connect()
             .unwrap();
@@ -68,9 +63,7 @@ fn isotp_fd_transfer_kvaser_to_pcan(payload: &[u8]) {
         let channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
-            .unwrap()
-            .data_bitrate(4_000_000)
+            .fd(500_000, 4_000_000)
             .unwrap()
             .connect()
             .unwrap();
@@ -87,9 +80,7 @@ fn isotp_fd_transfer_kvaser_to_pcan(payload: &[u8]) {
         let channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
-            .unwrap()
-            .data_bitrate(4_000_000)
+            .fd(500_000, 4_000_000)
             .unwrap()
             .connect()
             .unwrap();

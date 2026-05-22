@@ -18,7 +18,7 @@
 use std::env;
 use std::time::Duration;
 
-use can_hal::{ChannelBuilder, Driver, Frame, ReceiveFd};
+use can_hal::{Frame, ReceiveFd};
 use can_hal_pcan::PcanDriver;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -29,8 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let driver = PcanDriver::new()?;
     let mut channel = driver
         .channel(channel_index)?
-        .bitrate(500_000)?
-        .data_bitrate(4_000_000)?
+        .fd(500_000, 4_000_000)?
         .connect()?;
 
     println!("Channel opened at 500 kbit/s nominal, 4 Mbit/s data. Waiting for frames...");

@@ -3,8 +3,9 @@ use std::time::Duration;
 
 use can_hal::channel::Receive;
 use can_hal::frame::CanFrame;
-use can_hal::{BusState, BusStatus, CanId, ChannelBuilder, Driver, Transmit};
+use can_hal::{BusState, BusStatus, CanId, Transmit};
 use can_hal_isotp::{IsoTpChannel, IsoTpConfig};
+use can_hal_pcan::ClassicBitrate;
 
 const TX_ID: u16 = 0x7E0;
 const RX_ID: u16 = 0x7E8;
@@ -19,8 +20,7 @@ fn test_pcan_bus_status() {
     let channel = driver
         .channel(0)
         .unwrap()
-        .bitrate(500_000)
-        .unwrap()
+        .classic(ClassicBitrate::Br500K)
         .connect()
         .expect("Failed to open PCAN channel");
 
@@ -51,7 +51,7 @@ fn test_pcan_to_kvaser_raw_frame() {
         let mut channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
+            .classic(500_000)
             .unwrap()
             .connect()
             .unwrap();
@@ -69,8 +69,7 @@ fn test_pcan_to_kvaser_raw_frame() {
         driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
-            .unwrap()
+            .classic(ClassicBitrate::Br500K)
             .connect()
             .unwrap()
     };
@@ -94,8 +93,7 @@ fn test_kvaser_to_pcan_raw_frame() {
         let mut channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
-            .unwrap()
+            .classic(ClassicBitrate::Br500K)
             .connect()
             .unwrap();
         let received = channel
@@ -112,7 +110,7 @@ fn test_kvaser_to_pcan_raw_frame() {
         driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
+            .classic(500_000)
             .unwrap()
             .connect()
             .unwrap()
@@ -141,7 +139,7 @@ fn isotp_transfer_pcan_to_kvaser(payload: &[u8]) {
         let channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
+            .classic(500_000)
             .unwrap()
             .connect()
             .unwrap();
@@ -158,8 +156,7 @@ fn isotp_transfer_pcan_to_kvaser(payload: &[u8]) {
         let channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
-            .unwrap()
+            .classic(ClassicBitrate::Br500K)
             .connect()
             .unwrap();
         let mut config = IsoTpConfig::new(tx_id, rx_id);
@@ -184,8 +181,7 @@ fn isotp_transfer_kvaser_to_pcan(payload: &[u8]) {
         let channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
-            .unwrap()
+            .classic(ClassicBitrate::Br500K)
             .connect()
             .unwrap();
         let mut config = IsoTpConfig::new(rx_id, tx_id);
@@ -201,7 +197,7 @@ fn isotp_transfer_kvaser_to_pcan(payload: &[u8]) {
         let channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
+            .classic(500_000)
             .unwrap()
             .connect()
             .unwrap();
@@ -226,7 +222,7 @@ fn test_kvaser_open_no_thread() {
     let _channel = driver
         .channel(0)
         .unwrap()
-        .bitrate(500_000)
+        .classic(500_000)
         .unwrap()
         .connect()
         .expect("Kvaser channel open failed");

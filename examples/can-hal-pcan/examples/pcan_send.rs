@@ -19,8 +19,8 @@ use std::env;
 use std::thread;
 use std::time::Duration;
 
-use can_hal::{CanFrame, CanId, ChannelBuilder, Driver, Transmit};
-use can_hal_pcan::PcanDriver;
+use can_hal::{CanFrame, CanId, Transmit};
+use can_hal_pcan::{ClassicBitrate, PcanDriver};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let channel_index: u32 = env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -28,7 +28,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Opening PCAN USB channel {channel_index}...");
 
     let driver = PcanDriver::new()?;
-    let mut channel = driver.channel(channel_index)?.bitrate(500_000)?.connect()?;
+    let mut channel = driver
+        .channel(channel_index)?
+        .classic(ClassicBitrate::Br500K)
+        .connect()?;
 
     println!("Channel opened at 500 kbit/s. Sending frames...");
     println!("Press Ctrl+C to stop.\n");

@@ -51,24 +51,6 @@ pub const PCAN_BAUD_20K: u16 = 0x532F;
 pub const PCAN_BAUD_10K: u16 = 0x672F;
 pub const PCAN_BAUD_5K: u16 = 0x7F7F;
 
-/// Map a standard bitrate in Hz to a `PCAN_BAUD_*` constant.
-/// Returns `None` for unsupported bitrates.
-pub const fn bitrate_to_pcan(hz: u32) -> Option<u16> {
-    match hz {
-        1_000_000 => Some(PCAN_BAUD_1M),
-        800_000 => Some(PCAN_BAUD_800K),
-        500_000 => Some(PCAN_BAUD_500K),
-        250_000 => Some(PCAN_BAUD_250K),
-        125_000 => Some(PCAN_BAUD_125K),
-        100_000 => Some(PCAN_BAUD_100K),
-        50_000 => Some(PCAN_BAUD_50K),
-        20_000 => Some(PCAN_BAUD_20K),
-        10_000 => Some(PCAN_BAUD_10K),
-        5_000 => Some(PCAN_BAUD_5K),
-        _ => None,
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Message type flags
 // ---------------------------------------------------------------------------
@@ -225,13 +207,5 @@ mod tests {
     #[test]
     fn invalid_bus_type() {
         assert_eq!(pcan_handle(3, 0), None);
-    }
-
-    #[test]
-    fn bitrate_mapping() {
-        assert_eq!(bitrate_to_pcan(500_000), Some(PCAN_BAUD_500K));
-        assert_eq!(bitrate_to_pcan(1_000_000), Some(PCAN_BAUD_1M));
-        assert_eq!(bitrate_to_pcan(250_000), Some(PCAN_BAUD_250K));
-        assert_eq!(bitrate_to_pcan(123_456), None);
     }
 }

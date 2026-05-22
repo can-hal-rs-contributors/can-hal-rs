@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use std::os::raw::{c_long, c_ulong};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -24,27 +25,36 @@ use crate::ffi::{
     CAN_STAT_ERROR_PASSIVE, CAN_STAT_ERROR_WARNING,
 };
 use crate::library::KvaserLibrary;
+use crate::mode::{Classic, Fd};
 
 /// An open, on-bus KVASER CAN channel.
-pub struct KvaserChannel {
+///
+/// Parameterized on a type-state marker:
+/// - [`KvaserChannel<Classic>`] implements [`Transmit`] and [`Receive`].
+/// - [`KvaserChannel<Fd>`] implements [`TransmitFd`] and [`ReceiveFd`].
+///
+/// Both modes implement [`Filterable`] and [`BusStatus`].
+pub struct KvaserChannel<Mode> {
     pub(crate) lib: Arc<KvaserLibrary>,
     pub(crate) handle: i32,
-    pub(crate) fd_mode: bool,
     pub(crate) event: ReceiveEvent,
+    _mode: PhantomData<Mode>,
 }
 
-impl Drop for KvaserChannel {
-    fn drop(&mut self) {
-        // SAFETY: bus_off and close were loaded from canlib; handle is valid from canOpenChannel
-        #[allow(clippy::multiple_unsafe_ops_per_block, clippy::let_underscore_must_use)]
-        unsafe {
-            let _ = (self.lib.bus_off)(self.handle);
-            let _ = (self.lib.close)(self.handle);
-        }
+impl<Mode> KvaserChannel<Mode> {
+    pub(crate) const fn new(
+        lib: Arc<KvaserLibrary>,
+        handle: i32,
+        event: ReceiveEvent,
+    ) -> Result<Self, KvaserError> {
+        Ok(Self {
+            lib,
+            handle,
+            event,
+            _mode: PhantomData,
+        })
     }
-}
 
-impl KvaserChannel {
     /// Non-blocking read. Returns `Ok(None)` if the queue is empty.
     fn read_frame(&mut self) -> Result<Option<Frame>, KvaserError> {
         let mut raw_id: c_long = 0;
@@ -76,11 +86,22 @@ impl KvaserChannel {
     }
 }
 
+impl<Mode> Drop for KvaserChannel<Mode> {
+    fn drop(&mut self) {
+        // SAFETY: bus_off and close were loaded from canlib; handle is valid from canOpenChannel
+        #[allow(clippy::multiple_unsafe_ops_per_block, clippy::let_underscore_must_use)]
+        unsafe {
+            let _ = (self.lib.bus_off)(self.handle);
+            let _ = (self.lib.close)(self.handle);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
-// Transmit
+// Classic-mode trait impls
 // ---------------------------------------------------------------------------
 
-impl Transmit for KvaserChannel {
+impl Transmit for KvaserChannel<Classic> {
     type Error = KvaserError;
 
     #[allow(
@@ -106,11 +127,7 @@ impl Transmit for KvaserChannel {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Receive
-// ---------------------------------------------------------------------------
-
-impl Receive for KvaserChannel {
+impl Receive for KvaserChannel<Classic> {
     type Error = KvaserError;
     type Timestamp = Instant;
 
@@ -120,7 +137,6 @@ impl Receive for KvaserChannel {
                 Some(Frame::Can(f)) => return Ok(Timestamped::new(f, Instant::now())),
                 Some(Frame::Fd(_)) => {} // FD frame on classic receive — skip and retry
                 None => {
-                    // Bounded wait: see MAX_POLL_INTERVAL doc for rationale.
                     let _ = self.event.wait(Some(MAX_POLL_INTERVAL))?;
                 }
             }
@@ -131,7 +147,7 @@ impl Receive for KvaserChannel {
         loop {
             match self.read_frame()? {
                 Some(Frame::Can(f)) => return Ok(Some(Timestamped::new(f, Instant::now()))),
-                Some(Frame::Fd(_)) => {} // skip FD frames
+                Some(Frame::Fd(_)) => {}
                 None => return Ok(None),
             }
         }
@@ -143,21 +159,17 @@ impl Receive for KvaserChannel {
     ) -> Result<Option<Timestamped<CanFrame, Instant>>, KvaserError> {
         let deadline = Instant::now() + timeout;
         loop {
-            // Drain the queue before waiting on the event. If we hit an FD frame,
-            // keep reading — there may be a classic frame queued behind it. Only
-            // block on the event when the queue is truly empty.
             loop {
                 match self.read_frame()? {
                     Some(Frame::Can(f)) => return Ok(Some(Timestamped::new(f, Instant::now()))),
-                    Some(Frame::Fd(_)) => {} // skip FD frames, drain queue
-                    None => break,           // queue empty, need to wait
+                    Some(Frame::Fd(_)) => {}
+                    None => break,
                 }
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 return Ok(None);
             }
-            // Bounded wait: see MAX_POLL_INTERVAL doc for rationale.
             let poll_timeout = remaining.min(MAX_POLL_INTERVAL);
             let _ = self.event.wait(Some(poll_timeout))?;
         }
@@ -165,10 +177,10 @@ impl Receive for KvaserChannel {
 }
 
 // ---------------------------------------------------------------------------
-// TransmitFd
+// FD-mode trait impls
 // ---------------------------------------------------------------------------
 
-impl TransmitFd for KvaserChannel {
+impl TransmitFd for KvaserChannel<Fd> {
     type Error = KvaserError;
 
     #[allow(
@@ -178,11 +190,6 @@ impl TransmitFd for KvaserChannel {
         clippy::cast_lossless
     )]
     fn transmit_fd(&mut self, frame: &CanFdFrame) -> Result<(), KvaserError> {
-        if !self.fd_mode {
-            return Err(KvaserError::NotSupported(
-                "channel was not opened in FD mode; call data_bitrate() before connect()".into(),
-            ));
-        }
         let (id, mut flags) = to_canlib_id(frame.id());
         flags |= CAN_MSG_FDF;
         if frame.brs() {
@@ -206,25 +213,15 @@ impl TransmitFd for KvaserChannel {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ReceiveFd
-// ---------------------------------------------------------------------------
-
-impl ReceiveFd for KvaserChannel {
+impl ReceiveFd for KvaserChannel<Fd> {
     type Error = KvaserError;
     type Timestamp = Instant;
 
     fn receive_fd(&mut self) -> Result<Timestamped<Frame, Instant>, KvaserError> {
-        if !self.fd_mode {
-            return Err(KvaserError::NotSupported(
-                "channel was not opened in FD mode; call data_bitrate() before connect()".into(),
-            ));
-        }
         loop {
             match self.read_frame()? {
                 Some(frame) => return Ok(Timestamped::new(frame, Instant::now())),
                 None => {
-                    // Bounded wait: see MAX_POLL_INTERVAL doc for rationale.
                     let _ = self.event.wait(Some(MAX_POLL_INTERVAL))?;
                 }
             }
@@ -232,11 +229,6 @@ impl ReceiveFd for KvaserChannel {
     }
 
     fn try_receive_fd(&mut self) -> Result<Option<Timestamped<Frame, Instant>>, KvaserError> {
-        if !self.fd_mode {
-            return Err(KvaserError::NotSupported(
-                "channel was not opened in FD mode; call data_bitrate() before connect()".into(),
-            ));
-        }
         Ok(self
             .read_frame()?
             .map(|frame| Timestamped::new(frame, Instant::now())))
@@ -246,11 +238,6 @@ impl ReceiveFd for KvaserChannel {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<Timestamped<Frame, Instant>>, KvaserError> {
-        if !self.fd_mode {
-            return Err(KvaserError::NotSupported(
-                "channel was not opened in FD mode; call data_bitrate() before connect()".into(),
-            ));
-        }
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(frame) = self.read_frame()? {
@@ -260,7 +247,6 @@ impl ReceiveFd for KvaserChannel {
             if remaining.is_zero() {
                 return Ok(None);
             }
-            // Bounded wait: see MAX_POLL_INTERVAL doc for rationale.
             let poll_timeout = remaining.min(MAX_POLL_INTERVAL);
             let _ = self.event.wait(Some(poll_timeout))?;
         }
@@ -268,10 +254,10 @@ impl ReceiveFd for KvaserChannel {
 }
 
 // ---------------------------------------------------------------------------
-// Filterable
+// Filterable (both modes)
 // ---------------------------------------------------------------------------
 
-impl Filterable for KvaserChannel {
+impl<Mode> Filterable for KvaserChannel<Mode> {
     type Error = KvaserError;
 
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), KvaserError> {
@@ -295,7 +281,6 @@ impl Filterable for KvaserChannel {
     }
 
     fn clear_filters(&mut self) -> Result<(), KvaserError> {
-        // mask = 0 means no bits are checked -> every frame passes.
         for &flag in &[
             CAN_FILTER_SET_CODE_STD,
             CAN_FILTER_SET_MASK_STD,
@@ -320,7 +305,7 @@ fn apply_merged_filter(
     code_flag: u32,
     mask_flag: u32,
 ) -> Result<(), KvaserError> {
-    let mut merged: Option<(u32, u32)> = None; // (code, mask)
+    let mut merged: Option<(u32, u32)> = None;
 
     for f in filters.iter().filter(|f| predicate(f)) {
         let code = f.id.raw() & f.mask;
@@ -341,10 +326,10 @@ fn apply_merged_filter(
 }
 
 // ---------------------------------------------------------------------------
-// BusStatus
+// BusStatus (both modes)
 // ---------------------------------------------------------------------------
 
-impl BusStatus for KvaserChannel {
+impl<Mode> BusStatus for KvaserChannel<Mode> {
     type Error = KvaserError;
 
     fn bus_state(&self) -> Result<BusState, KvaserError> {
@@ -364,14 +349,12 @@ impl BusStatus for KvaserChannel {
     fn error_counters(&self) -> Result<ErrorCounters, KvaserError> {
         let mut tx_err: u32 = 0;
         let mut rx_err: u32 = 0;
-        // `overrun` counts frames lost due to receive buffer overflow.
-        // It is read to satisfy the CANlib API but is not exposed by `ErrorCounters`.
         let mut overrun: u32 = 0;
         // SAFETY: canReadErrorCounters was loaded from canlib; handle is valid
         check_status(unsafe {
             (self.lib.read_error_counters)(self.handle, &mut tx_err, &mut rx_err, &mut overrun)
         })?;
-        #[allow(clippy::cast_possible_truncation)] // clamped to 255
+        #[allow(clippy::cast_possible_truncation)]
         Ok(ErrorCounters {
             transmit: tx_err.min(255) as u8,
             receive: rx_err.min(255) as u8,

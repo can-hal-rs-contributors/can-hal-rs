@@ -66,6 +66,10 @@ pub enum PcanError {
     InvalidChannel(u32),
     /// The requested bitrate is not a standard PCAN-Basic bitrate.
     UnsupportedBitrate(u32),
+    /// No FD timing parameters satisfy the requested bitrate + sample point
+    /// at the 80 MHz PCAN clock, or builder state is incomplete (e.g.,
+    /// `data_bitrate()` set without `bitrate()`).
+    UnsupportedTiming(String),
     /// A platform-specific error (e.g., event creation failed).
     Platform(String),
 }
@@ -78,6 +82,7 @@ impl fmt::Display for PcanError {
             Self::InvalidFrame(msg) => write!(f, "invalid frame: {msg}"),
             Self::InvalidChannel(idx) => write!(f, "invalid PCAN channel index: {idx}"),
             Self::UnsupportedBitrate(br) => write!(f, "unsupported bitrate: {br} bps"),
+            Self::UnsupportedTiming(msg) => write!(f, "unsupported FD timing: {msg}"),
             Self::Platform(msg) => write!(f, "platform error: {msg}"),
         }
     }

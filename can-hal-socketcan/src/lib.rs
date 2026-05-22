@@ -10,15 +10,12 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use can_hal::{CanId, CanFrame, Transmit, Receive, ChannelBuilder};
+//! use can_hal::{CanId, CanFrame, Transmit, Receive};
 //! use can_hal_socketcan::SocketCanDriver;
 //!
 //! let driver = SocketCanDriver::new();
 //! let mut channel = driver
 //!     .channel_by_name("vcan0")
-//!     .unwrap()
-//!     .bitrate(500_000)
-//!     .unwrap()
 //!     .connect()
 //!     .unwrap();
 //!
@@ -29,16 +26,14 @@
 //!
 //! # Bitrate Configuration
 //!
-//! SocketCAN bitrate is configured at the OS level, not through the socket API.
-//! Use `ip link set` or netlink before opening a channel:
+//! SocketCAN bitrate is configured at the OS level, not through the socket
+//! API — the builder deliberately has no timing methods. Use `ip link set`
+//! or netlink before opening a channel:
 //!
 //! ```bash
 //! sudo ip link set can0 type can bitrate 500000
 //! sudo ip link set can0 up
 //! ```
-//!
-//! The builder's `bitrate()` / `data_bitrate()` / `sample_point()` methods
-//! store values for informational purposes but do not apply them.
 
 pub mod channel;
 pub mod driver;

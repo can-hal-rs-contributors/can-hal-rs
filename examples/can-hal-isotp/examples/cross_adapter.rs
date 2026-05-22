@@ -8,8 +8,8 @@ use std::thread;
 use std::time::Duration;
 
 use can_hal::CanId;
-use can_hal::{ChannelBuilder, Driver};
 use can_hal_isotp::{IsoTpChannel, IsoTpConfig};
+use can_hal_pcan::ClassicBitrate;
 
 fn main() {
     println!("=== ISO-TP Cross-Adapter Test: PCAN <-> Kvaser ===\n");
@@ -42,7 +42,7 @@ fn main() {
             let channel = driver
                 .channel(0)
                 .unwrap()
-                .bitrate(500_000)
+                .classic(500_000)
                 .unwrap()
                 .connect()
                 .unwrap();
@@ -67,8 +67,7 @@ fn main() {
             let channel = driver
                 .channel(0)
                 .unwrap()
-                .bitrate(500_000)
-                .unwrap()
+                .classic(ClassicBitrate::Br500K)
                 .connect()
                 .unwrap();
 
@@ -100,8 +99,7 @@ fn main() {
         let channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
-            .unwrap()
+            .classic(ClassicBitrate::Br500K)
             .connect()
             .unwrap();
 
@@ -122,7 +120,7 @@ fn main() {
         let channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
+            .classic(500_000)
             .unwrap()
             .connect()
             .unwrap();
