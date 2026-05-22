@@ -17,7 +17,9 @@ pub enum IsoTpError<E: Send + Sync + 'static> {
     InvalidFrame,
     /// Consecutive Frame sequence number mismatch.
     SequenceError { expected: u8, got: u8 },
-    /// Payload exceeds the maximum allowed size (4095 for classic, 0xFFFF_FFFF for long FF).
+    /// Payload exceeds the maximum allowed size. Both classic and FD use a
+    /// 32-bit length field via the long-FF escape, so the per-message ceiling
+    /// is `u32::MAX` bytes.
     PayloadTooLarge,
     /// Too many consecutive FC(Wait) frames received (exceeds `max_fc_wait`).
     WaitLimitExceeded,

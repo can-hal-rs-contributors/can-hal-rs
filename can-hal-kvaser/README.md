@@ -14,21 +14,20 @@
   </p>
 </div>
 
-Implements `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, `BusStatus`, `Driver`, and `ChannelBuilder` using the CANlib API from KVASER.
+Implements `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, and `BusStatus` using the CANlib API from KVASER. The channel builder uses typestate so that classic vs FD configuration paths are tracked at compile time.
 
 Supports USB, PCIe, and LAN KVASER interfaces on Windows and Linux.
 
 ## Usage
 
 ```rust,no_run
-use can_hal::{CanId, CanFrame, Transmit, Receive, ChannelBuilder};
+use can_hal::{CanId, CanFrame, Transmit, Receive};
 use can_hal_kvaser::KvaserDriver;
 
 let driver = KvaserDriver::new().expect("CANlib library not found");
 let mut channel = driver
     .channel(0)
-    .unwrap()
-    .bitrate(500_000)
+    .classic(500_000)
     .unwrap()
     .connect()
     .unwrap();
@@ -44,16 +43,13 @@ println!("{:?}", response.frame());
 ## CAN FD
 
 ```rust,no_run
-use can_hal::{ChannelBuilder, TransmitFd, CanId, CanFdFrame};
+use can_hal::{TransmitFd, CanId, CanFdFrame};
 use can_hal_kvaser::KvaserDriver;
 
 let driver = KvaserDriver::new().unwrap();
 let mut channel = driver
     .channel(0)
-    .unwrap()
-    .bitrate(500_000)
-    .unwrap()
-    .data_bitrate(2_000_000)
+    .fd(500_000, 2_000_000)
     .unwrap()
     .connect()
     .unwrap();
@@ -61,6 +57,43 @@ let mut channel = driver
 let id = CanId::new_standard(0x123).unwrap();
 let frame = CanFdFrame::new(id, &[0xDE, 0xAD], true, false).unwrap();
 channel.transmit_fd(&frame).unwrap();
+```
+
+## Sample points
+
+`.classic(...)` defaults to a 70% nominal sample point; `.fd(...)` adds an 80% data-phase default. Override per phase with `SamplePoint`:
+
+```rust,no_run
+use can_hal::SamplePoint;
+use can_hal_kvaser::KvaserDriver;
+
+let driver = KvaserDriver::new().unwrap();
+let mut channel = driver
+    .channel(0)
+    .fd(500_000, 4_000_000)
+    .unwrap()
+    .sample_point(SamplePoint::PCT_87_5)
+    .data_sample_point(SamplePoint::PCT_75)
+    .connect()
+    .unwrap();
+```
+
+## Raw timing
+
+For full control over `(tseg1, tseg2, sjw)` and the `noSamp` / `syncMode` flags, transition from `<Initial>` to `<ClassicExplicit>` / `<FdExplicit>` instead. The call site checks four invariants: the bitrate evenly divides the 80 MHz CANlib clock, the segment values are within the controller's range, `(bitrate * (1 + tseg1 + tseg2))` divides the clock, and the resulting prescaler lands in `[1, 1024]`.
+
+```rust,no_run
+use can_hal_kvaser::{BusParams, BusParamsFd, KvaserDriver};
+
+let driver = KvaserDriver::new().unwrap();
+let nominal = BusParams { tseg1: 13, tseg2: 6, sjw: 4, no_samp: 1, sync_mode: 0 };
+let data = BusParamsFd { tseg1: 7, tseg2: 2, sjw: 2 };
+let _channel = driver
+    .channel(0)
+    .fd_explicit(500_000, 4_000_000, nominal, data)
+    .unwrap()
+    .connect()
+    .unwrap();
 ```
 
 ## Prerequisites

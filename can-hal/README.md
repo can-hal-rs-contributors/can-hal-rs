@@ -31,11 +31,12 @@ can-hal-rs = { version = "0.3", default-features = false }
 |---|---|
 | `Transmit` / `Receive` | Classic CAN (up to 8 bytes) |
 | `TransmitFd` / `ReceiveFd` | CAN FD (up to 64 bytes) |
-| `Driver` / `ChannelBuilder` | Open and configure channels |
 | `Filterable` | Hardware acceptance filtering |
 | `BusStatus` | Bus state and error counters |
 
 Async variants (`AsyncTransmit`, `AsyncReceive`, etc.) are available behind the `async` feature flag.
+
+There is no shared `Driver` or `ChannelBuilder` trait - each backend exposes its own concrete driver and a typestate-driven builder where invalid combinations are compile errors. See the backend crates for details.
 
 ## Usage
 
@@ -53,9 +54,9 @@ fn echo<T: Transmit<Error = E> + Receive<Error = E>, E: can_hal::CanError>(
 
 ## Backend crates
 
-- [`can-hal-socketcan`](https://crates.io/crates/can-hal-socketcan) — Linux SocketCAN
-- [`can-hal-pcan`](https://crates.io/crates/can-hal-pcan) — PEAK PCAN-Basic (Windows and Linux)
-- [`can-hal-kvaser`](https://crates.io/crates/can-hal-kvaser) — KVASER CANlib (Windows and Linux)
+- [`can-hal-socketcan`](https://crates.io/crates/can-hal-socketcan) - Linux SocketCAN
+- [`can-hal-pcan`](https://crates.io/crates/can-hal-pcan) - PEAK PCAN-Basic (Windows and Linux)
+- [`can-hal-kvaser`](https://crates.io/crates/can-hal-kvaser) - KVASER CANlib (Windows and Linux)
 
 ## License
 

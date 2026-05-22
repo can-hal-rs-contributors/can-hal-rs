@@ -10,7 +10,7 @@
 //   sudo ip link set vcan0 up
 //
 // Usage:
-//   cargo run --example send -p can-hal-isotp-examples -- [interface] [hex_payload]
+//   cargo run --example isotp_send -p can-hal-isotp-examples -- [interface] [hex_payload]
 //
 // Defaults: interface = "vcan0", payload = "DEADBEEF01020304"
 //

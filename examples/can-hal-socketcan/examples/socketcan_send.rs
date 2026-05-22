@@ -12,8 +12,8 @@
 //   sudo ip link set can0 up
 //
 // Usage:
-//   cargo run --example send
-//   cargo run --example send -- <interface>
+//   cargo run --example socketcan_send
+//   cargo run --example socketcan_send -- <interface>
 //
 //   interface: SocketCAN interface name (default: "can0")
 

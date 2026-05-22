@@ -3,6 +3,7 @@ use std::io;
 
 /// Errors from the SocketCAN backend.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SocketCanError {
     /// An I/O error from the underlying socket.
     Io(io::Error),

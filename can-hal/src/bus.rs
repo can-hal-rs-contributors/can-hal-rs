@@ -22,7 +22,7 @@ pub struct ErrorCounters {
 
 /// Query the health and error state of a CAN bus controller.
 ///
-/// Not all backends support this — it is an optional trait.
+/// Not all backends support this - it is an optional trait.
 pub trait BusStatus {
     type Error: CanError;
 

@@ -14,22 +14,21 @@
   </p>
 </div>
 
-Implements `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, `BusStatus`, `Driver`, and `ChannelBuilder` using the PCAN-Basic API from Peak System.
+Implements `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, and `BusStatus` using the PCAN-Basic API from Peak System. The channel builder uses typestate so that classic vs FD paths are tracked at compile time and invalid combinations are compile errors.
 
 Supports USB, PCI, and LAN PCAN interfaces on Windows and Linux.
 
 ## Usage
 
 ```rust,no_run
-use can_hal::{CanId, CanFrame, Transmit, Receive, ChannelBuilder};
-use can_hal_pcan::PcanDriver;
+use can_hal::{CanId, CanFrame, Transmit, Receive};
+use can_hal_pcan::{PcanDriver, ClassicBitrate};
 
 let driver = PcanDriver::new().expect("PCAN-Basic library not found");
 let mut channel = driver
     .channel(0)
     .unwrap()
-    .bitrate(500_000)
-    .unwrap()
+    .classic(ClassicBitrate::Br500K)
     .connect()
     .unwrap();
 
@@ -41,23 +40,41 @@ let response = channel.receive().unwrap();
 println!("{:?}", response.frame());
 ```
 
+Classic bitrate is a `ClassicBitrate` enum so invalid values aren't representable; `.classic(...)` is infallible.
+
 ## CAN FD
 
-CAN FD initialization requires detailed timing parameters. Use the backend-specific `fd_timing_string()` method:
+`.fd(nominal_hz, data_hz)` validates that both bitrates evenly divide the 80 MHz PCAN clock; on success the builder transitions to FD state and exposes sample-point overrides. Defaults are 70% nominal and 80% data; override via `.sample_point()` / `.data_sample_point()` with a `SamplePoint` value:
 
 ```rust,no_run
-use can_hal::{ChannelBuilder, TransmitFd, CanId, CanFdFrame};
+use can_hal::{SamplePoint, TransmitFd, CanId, CanFdFrame};
 use can_hal_pcan::PcanDriver;
 
 let driver = PcanDriver::new().unwrap();
 let mut channel = driver
     .channel(0)
     .unwrap()
-    .fd_timing_string(
-        "f_clock_mhz=80, nom_brp=1, nom_tseg1=63, nom_tseg2=16, \
-         nom_sjw=16, data_brp=1, data_tseg1=7, data_tseg2=2, data_sjw=2"
-    )
+    .fd(500_000, 4_000_000)
     .unwrap()
+    .sample_point(SamplePoint::PCT_75)
+    .connect()
+    .unwrap();
+```
+
+For raw control over per-segment timing, transition straight from `<Initial>` to `<FdExplicit>` via `.fd_explicit(PcanFdTiming)` (e.g., for unusually large SJW values):
+
+```rust,no_run
+use can_hal_pcan::{PcanDriver, PcanFdTiming, PcanPhaseTiming};
+
+let driver = PcanDriver::new().unwrap();
+let timing = PcanFdTiming {
+    nominal: PcanPhaseTiming { brp: 8, tseg1: 13, tseg2: 6, sjw: 6 },
+    data:    PcanPhaseTiming { brp: 2, tseg1: 7,  tseg2: 2, sjw: 2 },
+};
+let _channel = driver
+    .channel(0)
+    .unwrap()
+    .fd_explicit(timing)
     .connect()
     .unwrap();
 ```

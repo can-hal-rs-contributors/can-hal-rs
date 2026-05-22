@@ -134,7 +134,7 @@ impl CanFdFrame {
     }
 }
 
-/// A frame of either type — used when receiving on an FD-capable bus.
+/// A frame of either type - used when receiving on an FD-capable bus.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Frame {
     Can(CanFrame),

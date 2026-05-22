@@ -31,12 +31,12 @@ can-hal/
 │   └── src/
 │       ├── lib.rs           # Re-exports, module declarations, unit tests
 │       ├── channel.rs       # Transmit, Receive, TransmitFd, ReceiveFd traits
-│       ├── driver.rs        # Driver, DriverFd, ChannelBuilder traits
 │       ├── frame.rs         # CanFrame, CanFdFrame, Frame enum, Timestamped
 │       ├── id.rs            # CanId (Standard 11-bit / Extended 29-bit)
 │       ├── filter.rs        # Filter struct, Filterable trait
 │       ├── bus.rs           # BusState, ErrorCounters, BusStatus trait
 │       ├── error.rs         # CanError blanket trait
+│       ├── timing.rs        # SamplePoint newtype
 │       └── async_channel.rs # Async variants of channel traits
 ├── can-hal-socketcan/       # Linux SocketCAN backend
 ├── can-hal-pcan/            # PEAK PCAN-Basic backend (Windows + Linux)
@@ -65,16 +65,37 @@ any backend:
 |---|---|
 | `Transmit` / `Receive` | Send/receive classic CAN frames |
 | `TransmitFd` / `ReceiveFd` | Send/receive CAN FD frames (`ReceiveFd` returns `Frame` enum) |
-| `Driver` / `DriverFd` | Factory to open channels on hardware interfaces |
-| `ChannelBuilder` | Configure bitrate, sample point, etc. before going on-bus |
 | `Filterable` | Set/clear hardware acceptance filters |
 | `BusStatus` | Query bus state (ErrorActive/Passive/BusOff) and error counters |
 | `CanError` | Blanket trait: `Error + Send + Sync + 'static` |
 | `Async*` variants | Async versions of Transmit/Receive/TransmitFd/ReceiveFd (behind `async` feature) |
 
+There is no shared `Driver` or `ChannelBuilder` trait. Each backend exposes its own
+concrete driver type and a **typestate-driven builder**: an `Initial` state transitions
+to `Classic`, `Fd`, or one of the `*Explicit` raw-timing states, and only the methods
+valid for the current state are callable. Invalid combinations (e.g., `data_sample_point`
+in classic mode, `transmit_fd` on a classic channel, mixing solver-driven sample-point
+setters with raw segment values) are compile errors, not runtime ones. Channels are
+likewise parameterized: `PcanChannel<Classic>` implements `Transmit + Receive`;
+`PcanChannel<Fd>` implements `TransmitFd + ReceiveFd`. Both implement `Filterable`
+and `BusStatus`.
+
+Sample points are wrapped in a [`can_hal::SamplePoint`] newtype with a `const fn`
+constructor that asserts `[500, 950]` per-mille at compile time when used in a
+`const` context. Use `SamplePoint::NOMINAL_DEFAULT` (70%) and `SamplePoint::DATA_DEFAULT`
+(80%) for the workspace-wide interop conventions.
+
 **Filter semantics vary by backend:** SocketCAN supports multiple independent filters
 (union semantics), while PCAN and Kvaser support a single ID+mask pair per frame type.
 Code that uses `Filterable` must be aware of this.
+
+### Builder API per backend
+
+| Backend | Classic | FD | Sample-point setters | Raw escape hatch |
+|---|---|---|---|---|
+| SocketCAN | `driver.channel_by_name(name).connect()?` (timing OS-managed) | n/a | n/a (no setters) | n/a |
+| PCAN | `driver.channel(0)?.classic(ClassicBitrate::Br500K).connect()?` (enum, infallible) | `driver.channel(0)?.fd(500_000, 4_000_000)?.connect()?` | `<Fd>` only (none in classic; use `fd(rate, rate)` for custom classic timing) | `<Initial>::fd_explicit(PcanFdTiming)` -> `<FdExplicit>` |
+| Kvaser | `driver.channel(0).classic(500_000)?.connect()?` (`channel()` infallible; all four bitrate-taking transitions - `classic`, `fd`, `classic_explicit`, `fd_explicit` - fail on 80 MHz divisibility; the `_explicit` variants additionally check segment bounds, `(bitrate * (1 + tseg1 + tseg2))` divisibility, and prescaler `[1, 1024]`) | `driver.channel(0).fd(500_000, 4_000_000)?.connect()?` | both `<Classic>` and `<Fd>` | `<Initial>::classic_explicit(hz, BusParams)?` / `fd_explicit(hz, hz, BusParams, BusParamsFd)?` |
 
 ## Build and Development
 
@@ -111,20 +132,33 @@ cargo clippy -p can-hal-pcan -p can-hal-kvaser \
 
 ### Running Examples
 
-Each backend has an example crate under `examples/`:
+Each backend has an example crate under `examples/`, exposing one
+`[[example]]` per file. Run via `cargo run -p <crate> --example <name>`:
 
 ```bash
 # SocketCAN (requires vcan0 or physical interface)
-cargo run -p can-hal-socketcan-example
+cargo run -p can-hal-socketcan-examples --example socketcan_send
+cargo run -p can-hal-socketcan-examples --example socketcan_receive
+cargo run -p can-hal-socketcan-examples --example filter
 
 # PCAN (requires PCAN hardware + library)
-cargo run -p can-hal-pcan-example
+cargo run -p can-hal-pcan-examples --example pcan_send
+cargo run -p can-hal-pcan-examples --example pcan_receive
+cargo run -p can-hal-pcan-examples --example pcan_send_fd
+cargo run -p can-hal-pcan-examples --example pcan_receive_fd
+cargo run -p can-hal-pcan-examples --example bus_status
 
 # Kvaser (requires Kvaser hardware + library)
-cargo run -p can-hal-kvaser-example
+cargo run -p can-hal-kvaser-examples --example kvaser_send
+cargo run -p can-hal-kvaser-examples --example kvaser_receive
+cargo run -p can-hal-kvaser-examples --example kvaser_send_fd
+cargo run -p can-hal-kvaser-examples --example kvaser_receive_fd
 
 # ISO-TP
-cargo run -p can-hal-isotp-example
+cargo run -p can-hal-isotp-examples --example isotp_send
+cargo run -p can-hal-isotp-examples --example isotp_receive
+cargo run -p can-hal-isotp-examples --example loopback
+# see examples/can-hal-isotp/examples/ for the full list
 ```
 
 ### Virtual CAN Setup (for SocketCAN testing without hardware)
@@ -132,7 +166,7 @@ cargo run -p can-hal-isotp-example
 ```bash
 sudo modprobe vcan
 sudo ip link add dev vcan0 type vcan
-sudo ip link set up vcan0
+sudo ip link set vcan0 up
 ```
 
 ## Hardware-in-the-Loop (HIL) Testing
@@ -177,13 +211,23 @@ Timing parameters must match across all adapters on the same bus, or nodes will 
 
 ### Backend-Specific Timing Notes
 
-- **PCAN**: Uses `fd_timing_string()` on the builder. Clock is 80 MHz.
-- **Kvaser**: Requires explicit timing values. The `libcanlib.so.1` on Linux does **not**
-  accept predefined bitrate constants (negative frequency values like `-2` for 500K); these
-  return `canERR_PARAM`. Always pass explicit `freq_hz` + segment values.
+- **PCAN**: 80 MHz clock. The builder runs an internal solver that derives
+  `(brp, tseg1, tseg2, sjw)` from `.fd(nominal, data)` plus optional
+  `.sample_point(SamplePoint)` / `.data_sample_point(SamplePoint)`. Sample
+  points default to 70% (nominal) and 80% (data). For raw per-segment
+  control, transition straight from `<Initial>` to `<FdExplicit>` via
+  `.fd_explicit(PcanFdTiming)`. Classic CAN uses the predefined
+  `ClassicBitrate` enum and has no sample-point control (PCAN-Basic API
+  limitation).
+- **Kvaser**: 80 MHz clock. Same solver shape as PCAN. Classic and FD
+  builders both honor `.sample_point()` / `.data_sample_point()`. For raw
+  control, use `.classic_explicit(hz, BusParams)?` or
+  `.fd_explicit(hz, hz, BusParams, BusParamsFd)?` on `<Initial>`. The
+  `libcanlib.so.1` on Linux does **not** accept predefined bitrate constants
+  (negative frequency values like `-2` for 500K); these return
+  `canERR_PARAM`. Always pass explicit `freq_hz` + segment values.
 - **SocketCAN**: Bitrate is configured at the OS level (`ip link set can0 type can
-  bitrate 500000`), not through the socket API. The `bitrate()` builder method is a no-op
-  for SocketCAN.
+  bitrate 500000`), not through the socket API. The builder has no timing methods.
 
 ## Backend Architecture
 
@@ -191,8 +235,9 @@ All three backends follow the same pattern:
 
 | File | Purpose |
 |---|---|
-| `driver.rs` | `Driver` / `DriverFd` impl — opens channels |
-| `channel.rs` | `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, `BusStatus` impls |
+| `driver.rs` | Concrete driver type + typestate `ChannelBuilder<Mode>` |
+| `mode.rs` | Type-state markers (`Initial`, `Classic`, `Fd`, `*Explicit`) with private state |
+| `channel.rs` | `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable` impls (split by mode); `BusStatus` on PCAN/Kvaser only |
 | `convert.rs` | Conversions between `can-hal` frame types and vendor-specific types |
 | `error.rs` | Backend error type implementing `CanError` |
 | `ffi.rs` | FFI bindings (PCAN and Kvaser only) |
@@ -203,7 +248,7 @@ All three backends follow the same pattern:
 
 - **Dynamic linking**: PCAN and Kvaser load vendor libraries at runtime via `libloading`.
   This means the crates compile without the vendor SDK installed; errors surface at runtime
-  when `Driver::new()` is called.
+  when the driver's `new()` is called.
 - **SocketCAN uses the `socketcan` crate**: Unlike the other backends, SocketCAN wraps an
   existing Rust crate rather than doing raw FFI.
 - **Timestamped frames**: The `Timestamped<F, T>` wrapper lets each backend choose its own
@@ -215,10 +260,10 @@ The ISO-TP crate implements ISO 15765-2 segmentation and reassembly, generic ove
 `Transmit + Receive` channel.
 
 **Key types:**
-- `IsoTpChannel<C>` — classic CAN transport
-- `IsoTpFdChannel<C>` — CAN FD transport (up to 4095 bytes per message)
-- `IsoTpConfig` — TX/RX CAN IDs, addressing mode
-- `AddressingMode` — Normal, Extended, Functional
+- `IsoTpChannel<C>` - classic CAN transport (up to 4095 bytes via short FF; up to 4 GB via long FF)
+- `IsoTpFdChannel<C>` - CAN FD transport (same limits)
+- `IsoTpConfig` - TX/RX CAN IDs, addressing mode
+- `AddressingMode` - Normal, Extended, Functional
 
 **Async support:** Enable the `async` feature for `AsyncIsoTpChannel` and
 `AsyncIsoTpFdChannel` (backed by `tokio`).
@@ -246,9 +291,10 @@ The ISO-TP crate implements ISO 15765-2 segmentation and reassembly, generic ove
 
 | File | Why it matters |
 |---|---|
-| `can-hal/src/channel.rs` | Core Transmit/Receive traits — start here |
+| `can-hal/src/channel.rs` | Core Transmit/Receive traits - start here |
 | `can-hal/src/frame.rs` | Frame types used everywhere |
-| `can-hal/src/driver.rs` | Driver/ChannelBuilder pattern |
+| `can-hal-{pcan,kvaser}/src/driver.rs` | Typestate builder per backend |
+| `can-hal-{pcan,kvaser}/src/mode.rs` | `Initial`/`Classic`/`Fd` type-state markers |
 | `can-hal-isotp/src/channel.rs` | ISO-TP segmentation logic |
 | `hardware-tests/tests/cross_adapter.rs` | Integration test template |
 | `.github/workflows/ci.yml` | What CI checks |

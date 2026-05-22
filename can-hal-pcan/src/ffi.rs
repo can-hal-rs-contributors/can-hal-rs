@@ -51,24 +51,6 @@ pub const PCAN_BAUD_20K: u16 = 0x532F;
 pub const PCAN_BAUD_10K: u16 = 0x672F;
 pub const PCAN_BAUD_5K: u16 = 0x7F7F;
 
-/// Map a standard bitrate in Hz to a `PCAN_BAUD_*` constant.
-/// Returns `None` for unsupported bitrates.
-pub const fn bitrate_to_pcan(hz: u32) -> Option<u16> {
-    match hz {
-        1_000_000 => Some(PCAN_BAUD_1M),
-        800_000 => Some(PCAN_BAUD_800K),
-        500_000 => Some(PCAN_BAUD_500K),
-        250_000 => Some(PCAN_BAUD_250K),
-        125_000 => Some(PCAN_BAUD_125K),
-        100_000 => Some(PCAN_BAUD_100K),
-        50_000 => Some(PCAN_BAUD_50K),
-        20_000 => Some(PCAN_BAUD_20K),
-        10_000 => Some(PCAN_BAUD_10K),
-        5_000 => Some(PCAN_BAUD_5K),
-        _ => None,
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Message type flags
 // ---------------------------------------------------------------------------
@@ -123,13 +105,17 @@ pub const PCAN_MODE_EXTENDED: u8 = 0x02;
 // ---------------------------------------------------------------------------
 
 pub const PCAN_RECEIVE_EVENT: u8 = 0x03;
-pub const PCAN_RECEIVE_STATUS: u8 = 0x04;
+pub const PCAN_MESSAGE_FILTER: u8 = 0x04;
 pub const PCAN_BUSOFF_AUTORESET: u8 = 0x07;
 pub const PCAN_LISTEN_ONLY: u8 = 0x08;
 pub const PCAN_CONTROLLER_NUMBER: u8 = 0x1A;
 pub const PCAN_CHANNEL_CONDITION: u8 = 0x09;
 pub const PCAN_BUSERROR_READ: u8 = 0x24;
 pub const PCAN_BUSERROR_WRITE: u8 = 0x25;
+
+// Values for PCAN_MESSAGE_FILTER.
+pub const PCAN_FILTER_CLOSE: u32 = 0;
+pub const PCAN_FILTER_OPEN: u32 = 1;
 
 // ---------------------------------------------------------------------------
 // Message structs
@@ -225,13 +211,5 @@ mod tests {
     #[test]
     fn invalid_bus_type() {
         assert_eq!(pcan_handle(3, 0), None);
-    }
-
-    #[test]
-    fn bitrate_mapping() {
-        assert_eq!(bitrate_to_pcan(500_000), Some(PCAN_BAUD_500K));
-        assert_eq!(bitrate_to_pcan(1_000_000), Some(PCAN_BAUD_1M));
-        assert_eq!(bitrate_to_pcan(250_000), Some(PCAN_BAUD_250K));
-        assert_eq!(bitrate_to_pcan(123_456), None);
     }
 }

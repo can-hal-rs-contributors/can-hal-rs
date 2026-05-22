@@ -20,7 +20,6 @@ use std::thread;
 use std::time::Duration;
 
 use can_hal::CanId;
-use can_hal::{ChannelBuilder, Driver};
 use can_hal_isotp::{IsoTpConfig, IsoTpFdChannel};
 
 fn main() {
@@ -56,10 +55,7 @@ fn main() {
             let driver = can_hal_kvaser::KvaserDriver::new().expect("CANlib not found");
             let channel = driver
                 .channel(0)
-                .unwrap()
-                .bitrate(500_000)
-                .unwrap()
-                .data_bitrate(4_000_000)
+                .fd(500_000, 4_000_000)
                 .unwrap()
                 .connect()
                 .unwrap();
@@ -82,9 +78,7 @@ fn main() {
             let channel = driver
                 .channel(0)
                 .unwrap()
-                .bitrate(500_000)
-                .unwrap()
-                .data_bitrate(4_000_000)
+                .fd(500_000, 4_000_000)
                 .unwrap()
                 .connect()
                 .unwrap();
@@ -118,9 +112,7 @@ fn main() {
         let channel = driver
             .channel(0)
             .unwrap()
-            .bitrate(500_000)
-            .unwrap()
-            .data_bitrate(4_000_000)
+            .fd(500_000, 4_000_000)
             .unwrap()
             .connect()
             .unwrap();
@@ -140,10 +132,7 @@ fn main() {
         let driver = can_hal_kvaser::KvaserDriver::new().expect("CANlib not found");
         let channel = driver
             .channel(0)
-            .unwrap()
-            .bitrate(500_000)
-            .unwrap()
-            .data_bitrate(4_000_000)
+            .fd(500_000, 4_000_000)
             .unwrap()
             .connect()
             .unwrap();

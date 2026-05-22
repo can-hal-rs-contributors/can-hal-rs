@@ -1,8 +1,13 @@
 //! PCAN channel implementation.
 //!
 //! [`PcanChannel`] wraps a PCAN-Basic channel handle and implements the
-//! `can-hal` traits for CAN communication.
+//! `can-hal` traits for CAN communication. The channel is parameterized on
+//! a type-state marker - [`crate::mode::Classic`] or [`crate::mode::Fd`] -
+//! and only the trait impls valid for that mode are available, so calling
+//! `transmit_fd` on a classic channel is a compile error rather than a
+//! runtime `InvalidFrame`.
 
+use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -16,41 +21,42 @@ use crate::error::{check_status, PcanError};
 use crate::event::ReceiveEvent;
 use crate::ffi;
 use crate::library::PcanLibrary;
+use crate::mode::{Classic, Fd};
 
 /// A CAN channel backed by a PCAN-Basic hardware interface.
 ///
-/// Implements [`Transmit`], [`Receive`], [`TransmitFd`], [`ReceiveFd`],
-/// [`Filterable`], and [`BusStatus`].
+/// Parameterized on a type-state marker:
+/// - [`PcanChannel<Classic>`] implements [`Transmit`] and [`Receive`].
+/// - [`PcanChannel<Fd>`] implements [`TransmitFd`] and [`ReceiveFd`].
+///
+/// Both modes implement [`Filterable`] and [`BusStatus`].
 ///
 /// Created via [`PcanDriver`](crate::PcanDriver) and
 /// [`PcanChannelBuilder`](crate::PcanChannelBuilder).
-pub struct PcanChannel {
+pub struct PcanChannel<Mode> {
     lib: Arc<PcanLibrary>,
     handle: u16,
     event: ReceiveEvent,
-    fd_mode: bool,
+    _mode: PhantomData<Mode>,
 }
 
-impl PcanChannel {
-    /// Create a new channel. Called by the builder after `CAN_Initialize`
-    /// succeeds.
-    pub(crate) fn new(
-        lib: Arc<PcanLibrary>,
-        handle: u16,
-        fd_mode: bool,
-    ) -> Result<Self, PcanError> {
-        let event = ReceiveEvent::new(lib.clone(), handle)?;
-        Ok(Self {
+impl<Mode> PcanChannel<Mode> {
+    /// Infallible constructor. Called by the builder after both
+    /// `CAN_Initialize{,FD}` and `ReceiveEvent::new` have succeeded.
+    pub(crate) const fn new(lib: Arc<PcanLibrary>, handle: u16, event: ReceiveEvent) -> Self {
+        Self {
             lib,
             handle,
             event,
-            fd_mode,
-        })
+            _mode: PhantomData,
+        }
     }
+}
 
-    /// Try to read a classic CAN frame from the receive queue.
-    /// Returns `Ok(None)` if the queue is empty or the frame was skipped
-    /// (RTR, status).
+impl PcanChannel<Classic> {
+    /// Try to read a classic CAN frame from the receive queue. Returns
+    /// `Ok(None)` if the queue is empty or the frame was skipped (RTR,
+    /// status).
     fn read_classic(&self) -> Result<Option<CanFrame>, PcanError> {
         let mut msg = ffi::TPCANMsg {
             id: 0,
@@ -72,9 +78,11 @@ impl PcanChannel {
         check_status(status)?;
         convert::from_pcan_msg(&msg)
     }
+}
 
-    /// Try to read any frame (classic or FD) via `CAN_ReadFD`.
-    /// Returns `Ok(None)` if the queue is empty or the frame was skipped.
+impl PcanChannel<Fd> {
+    /// Try to read any frame (classic or FD) via `CAN_ReadFD`. Returns
+    /// `Ok(None)` if the queue is empty or the frame was skipped.
     fn read_fd(&self) -> Result<Option<Frame>, PcanError> {
         let mut msg = ffi::TPCANMsgFD {
             id: 0,
@@ -94,7 +102,7 @@ impl PcanChannel {
     }
 }
 
-impl Drop for PcanChannel {
+impl<Mode> Drop for PcanChannel<Mode> {
     fn drop(&mut self) {
         // SAFETY: uninitialize() was loaded from PCANBasic and self.handle is valid.
         // Errors during cleanup are deliberately ignored.
@@ -106,10 +114,10 @@ impl Drop for PcanChannel {
 }
 
 // ---------------------------------------------------------------------------
-// Transmit
+// Classic-mode trait impls
 // ---------------------------------------------------------------------------
 
-impl Transmit for PcanChannel {
+impl Transmit for PcanChannel<Classic> {
     type Error = PcanError;
 
     fn transmit(&mut self, frame: &CanFrame) -> Result<(), Self::Error> {
@@ -121,11 +129,7 @@ impl Transmit for PcanChannel {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Receive (classic CAN)
-// ---------------------------------------------------------------------------
-
-impl Receive for PcanChannel {
+impl Receive for PcanChannel<Classic> {
     type Error = PcanError;
     type Timestamp = Instant;
 
@@ -169,19 +173,13 @@ impl Receive for PcanChannel {
 }
 
 // ---------------------------------------------------------------------------
-// TransmitFd
+// FD-mode trait impls
 // ---------------------------------------------------------------------------
 
-impl TransmitFd for PcanChannel {
+impl TransmitFd for PcanChannel<Fd> {
     type Error = PcanError;
 
     fn transmit_fd(&mut self, frame: &CanFdFrame) -> Result<(), Self::Error> {
-        if !self.fd_mode {
-            return Err(PcanError::InvalidFrame(
-                "channel was not initialized in FD mode; use data_bitrate() or fd_timing_string() before connect()"
-                    .into(),
-            ));
-        }
         let mut msg = convert::to_pcan_msg_fd(frame);
         // SAFETY: write_fd() was loaded from PCANBasic and self.handle is valid.
         // msg points to a valid stack-allocated TPCANMsgFD.
@@ -190,21 +188,11 @@ impl TransmitFd for PcanChannel {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ReceiveFd
-// ---------------------------------------------------------------------------
-
-impl ReceiveFd for PcanChannel {
+impl ReceiveFd for PcanChannel<Fd> {
     type Error = PcanError;
     type Timestamp = Instant;
 
     fn receive_fd(&mut self) -> Result<Timestamped<Frame, Instant>, Self::Error> {
-        if !self.fd_mode {
-            return Err(PcanError::InvalidFrame(
-                "channel was not initialized in FD mode; use data_bitrate() or fd_timing_string() before connect()"
-                    .into(),
-            ));
-        }
         loop {
             if let Some(frame) = self.read_fd()? {
                 return Ok(Timestamped::new(frame, Instant::now()));
@@ -214,12 +202,6 @@ impl ReceiveFd for PcanChannel {
     }
 
     fn try_receive_fd(&mut self) -> Result<Option<Timestamped<Frame, Instant>>, Self::Error> {
-        if !self.fd_mode {
-            return Err(PcanError::InvalidFrame(
-                "channel was not initialized in FD mode; use data_bitrate() or fd_timing_string() before connect()"
-                    .into(),
-            ));
-        }
         Ok(self
             .read_fd()?
             .map(|frame| Timestamped::new(frame, Instant::now())))
@@ -229,12 +211,11 @@ impl ReceiveFd for PcanChannel {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<Timestamped<Frame, Instant>>, Self::Error> {
-        if !self.fd_mode {
-            return Err(PcanError::InvalidFrame(
-                "channel was not initialized in FD mode; use data_bitrate() or fd_timing_string() before connect()"
-                    .into(),
-            ));
-        }
+        // Cap poll interval to avoid missing frames when the event fd is
+        // edge-triggered: the signal from an earlier frame (e.g. a TX echo)
+        // can mask the arrival of a later frame.
+        const MAX_POLL: Duration = Duration::from_millis(50);
+
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(frame) = self.read_fd()? {
@@ -244,19 +225,17 @@ impl ReceiveFd for PcanChannel {
             if now >= deadline {
                 return Ok(None);
             }
-            let signaled = self.event.wait(Some(deadline - now))?;
-            if !signaled {
-                return Ok(self.read_fd()?.map(|f| Timestamped::new(f, Instant::now())));
-            }
+            let wait_dur = (deadline - now).min(MAX_POLL);
+            let _ = self.event.wait(Some(wait_dur))?;
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Filterable
+// Filterable (both modes)
 // ---------------------------------------------------------------------------
 
-impl Filterable for PcanChannel {
+impl<Mode> Filterable for PcanChannel<Mode> {
     type Error = PcanError;
 
     /// Apply acceptance filters.
@@ -268,6 +247,11 @@ impl Filterable for PcanChannel {
     ///
     /// This may accept additional IDs beyond the intended set when masks have
     /// non-contiguous zero bits.
+    ///
+    /// PCAN-Basic's `CAN_FilterMessages` only widens the active filter, so to
+    /// actually narrow we first switch the channel's `PCAN_MESSAGE_FILTER`
+    /// state to `CLOSE` (reject all), then call `CAN_FilterMessages` to open
+    /// the requested ranges.
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), Self::Error> {
         if filters.is_empty() {
             return self.clear_filters();
@@ -289,44 +273,61 @@ impl Filterable for PcanChannel {
             }
         }
 
-        if let (Some(from), Some(to)) = (std_min, std_max) {
-            // SAFETY: filter_messages() was loaded from PCANBasic and self.handle is valid.
-            let status = unsafe {
-                (self.lib.filter_messages)(self.handle, from, to, ffi::PCAN_MODE_STANDARD)
-            };
-            check_status(status)?;
-        }
+        // Close the filter (reject all), then open the requested ranges via
+        // CAN_FilterMessages.
+        self.set_filter_state(ffi::PCAN_FILTER_CLOSE)?;
 
-        if let (Some(from), Some(to)) = (ext_min, ext_max) {
-            // SAFETY: filter_messages() was loaded from PCANBasic and self.handle is valid.
-            let status = unsafe {
-                (self.lib.filter_messages)(self.handle, from, to, ffi::PCAN_MODE_EXTENDED)
-            };
-            check_status(status)?;
-        }
+        let apply = (|| {
+            if let (Some(from), Some(to)) = (std_min, std_max) {
+                // SAFETY: filter_messages() was loaded from PCANBasic and self.handle is valid.
+                let status = unsafe {
+                    (self.lib.filter_messages)(self.handle, from, to, ffi::PCAN_MODE_STANDARD)
+                };
+                check_status(status)?;
+            }
+            if let (Some(from), Some(to)) = (ext_min, ext_max) {
+                // SAFETY: filter_messages() was loaded from PCANBasic and self.handle is valid.
+                let status = unsafe {
+                    (self.lib.filter_messages)(self.handle, from, to, ffi::PCAN_MODE_EXTENDED)
+                };
+                check_status(status)?;
+            }
+            Ok(())
+        })();
 
-        Ok(())
+        if apply.is_err() {
+            // Best-effort: leave filters in accept-all rather than a
+            // half-merged state. Ignore secondary cleanup failure.
+            #[allow(clippy::let_underscore_must_use)]
+            let _ = self.clear_filters();
+        }
+        apply
     }
 
     fn clear_filters(&mut self) -> Result<(), Self::Error> {
-        // SAFETY: filter_messages() was loaded from PCANBasic and self.handle is valid.
-        let status = unsafe {
-            (self.lib.filter_messages)(self.handle, 0x000, 0x7FF, ffi::PCAN_MODE_STANDARD)
-        };
-        check_status(status)?;
+        // Switch PCAN_MESSAGE_FILTER to OPEN to accept all frames regardless
+        // of frame type. Using SetValue avoids the expand-only semantics of
+        // CAN_FilterMessages.
+        self.set_filter_state(ffi::PCAN_FILTER_OPEN)
+    }
+}
 
-        // SAFETY: filter_messages() was loaded from PCANBasic and self.handle is valid.
+impl<Mode> PcanChannel<Mode> {
+    /// Set the channel's `PCAN_MESSAGE_FILTER` parameter.
+    fn set_filter_state(&self, state: u32) -> Result<(), PcanError> {
+        let mut value = state;
+        #[allow(clippy::cast_possible_truncation)] // size_of::<u32>() == 4, fits in u32
+        // SAFETY: set_value() was loaded from PCANBasic and self.handle is valid.
+        // value is a stack-allocated u32 with the matching buffer length.
         let status = unsafe {
-            (self.lib.filter_messages)(
+            (self.lib.set_value)(
                 self.handle,
-                0x0000_0000,
-                0x1FFF_FFFF,
-                ffi::PCAN_MODE_EXTENDED,
+                ffi::PCAN_MESSAGE_FILTER,
+                std::ptr::from_mut(&mut value).cast::<std::ffi::c_void>(),
+                std::mem::size_of::<u32>() as u32,
             )
         };
-        check_status(status)?;
-
-        Ok(())
+        check_status(status)
     }
 }
 
@@ -347,10 +348,10 @@ const fn mask_to_range(filter: &Filter) -> (u32, u32, bool) {
 }
 
 // ---------------------------------------------------------------------------
-// BusStatus
+// BusStatus (both modes)
 // ---------------------------------------------------------------------------
 
-impl BusStatus for PcanChannel {
+impl<Mode> BusStatus for PcanChannel<Mode> {
     type Error = PcanError;
 
     fn bus_state(&self) -> Result<BusState, Self::Error> {

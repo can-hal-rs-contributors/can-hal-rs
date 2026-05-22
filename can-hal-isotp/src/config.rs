@@ -55,7 +55,7 @@ pub struct IsoTpConfig {
     /// the overall `timeout`).
     pub max_fc_wait: u8,
     /// CAN ID used for functionally addressed (broadcast) requests.
-    /// Functional requests MUST fit in a single frame — no multi-frame allowed.
+    /// Functional requests MUST fit in a single frame - no multi-frame allowed.
     /// Typically 0x7DF (11-bit) for UDS. `None` means functional addressing is not used.
     pub functional_id: Option<CanId>,
 }

@@ -14,20 +14,17 @@
   </p>
 </div>
 
-Implements `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, `Driver`, and `ChannelBuilder` using SocketCAN sockets.
+Implements `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, and `Filterable` over SocketCAN sockets. Bitrate is OS-managed (see "Interface setup" below) so the builder intentionally has no timing methods.
 
 ## Usage
 
 ```rust,no_run
-use can_hal::{CanId, CanFrame, Transmit, Receive, ChannelBuilder};
+use can_hal::{CanId, CanFrame, Transmit, Receive};
 use can_hal_socketcan::SocketCanDriver;
 
 let driver = SocketCanDriver::new();
 let mut channel = driver
     .channel_by_name("can0")
-    .unwrap()
-    .bitrate(500_000)
-    .unwrap()
     .connect()
     .unwrap();
 

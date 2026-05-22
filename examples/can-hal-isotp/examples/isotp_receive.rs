@@ -10,7 +10,7 @@
 //   sudo ip link set vcan0 up
 //
 // Usage:
-//   cargo run --example receive -p can-hal-isotp-examples -- [interface]
+//   cargo run --example isotp_receive -p can-hal-isotp-examples -- [interface]
 //
 // Default interface: vcan0
 //

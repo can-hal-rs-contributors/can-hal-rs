@@ -1,24 +1,26 @@
 //! # can-hal-pcan
 //!
-//! PCAN-Basic backend for [`can_hal`] traits (Windows and Linux).
+//! PCAN-Basic backend for [`can_hal`] (Windows and Linux).
 //!
-//! This crate provides [`PcanDriver`] and [`PcanChannel`] which implement the
-//! hardware-agnostic CAN traits defined in `can-hal`, enabling portable CAN
-//! application code to run on systems with Peak System PCAN hardware.
+//! Provides [`PcanDriver`] and [`PcanChannel<Mode>`] which implement the
+//! hardware-agnostic channel traits defined in `can-hal`. The channel is
+//! parameterized on a type-state marker - [`mode::Classic`] or
+//! [`mode::Fd`] - so invalid combinations (e.g., calling `transmit_fd` on a
+//! classic channel) are compile errors, not runtime ones.
 //!
 //! The PCAN-Basic library (`PCANBasic.dll` on Windows, `libpcanbasic.so` on
-//! Linux) is loaded dynamically at runtime — no compile-time link is required.
+//! Linux) is loaded dynamically at runtime - no compile-time link is required.
 //!
-//! # Example
+//! # Classic CAN example
 //!
 //! ```rust,ignore
-//! use can_hal::{CanId, CanFrame, Transmit, Receive, ChannelBuilder};
-//! use can_hal_pcan::PcanDriver;
+//! use can_hal::{CanId, CanFrame, Transmit, Receive};
+//! use can_hal_pcan::{PcanDriver, ClassicBitrate};
 //!
 //! let driver = PcanDriver::new()?;
 //! let mut channel = driver
 //!     .channel(0)?
-//!     .bitrate(500_000)?
+//!     .classic(ClassicBitrate::Br500K)
 //!     .connect()?;
 //!
 //! let id = CanId::new_standard(0x123).unwrap();
@@ -26,31 +28,27 @@
 //! channel.transmit(&frame)?;
 //! ```
 //!
-//! # CAN FD
+//! # CAN FD example
 //!
-//! Use [`bitrate()`](can_hal::ChannelBuilder::bitrate) and
-//! [`data_bitrate()`](can_hal::ChannelBuilder::data_bitrate) to open an FD
-//! channel. Timing parameters are derived automatically for common bitrates
-//! (80 MHz clock).
+//! Sample points default to 70% (nominal) and 80% (data). Override with
+//! `sample_point()` / `data_sample_point()` on the FD-mode builder; for raw
+//! per-segment control use `PcanChannelBuilder::<Initial>::fd_explicit` with
+//! a [`PcanFdTiming`] value.
 //!
 //! ```rust,ignore
-//! use can_hal::{ChannelBuilder, TransmitFd, CanId, CanFdFrame};
+//! use can_hal::{TransmitFd, CanId, CanFdFrame};
 //! use can_hal_pcan::PcanDriver;
 //!
 //! let driver = PcanDriver::new()?;
 //! let mut channel = driver
 //!     .channel(0)?
-//!     .bitrate(500_000)?
-//!     .data_bitrate(4_000_000)?
+//!     .fd(500_000, 4_000_000)?
 //!     .connect()?;
 //!
 //! let id = CanId::new_extended(0x18DA00F1).unwrap();
 //! let frame = CanFdFrame::new(id, &[0x10, 0x03], true, false).unwrap();
 //! channel.transmit_fd(&frame)?;
 //! ```
-//!
-//! For custom timing, use the backend-specific
-//! [`fd_timing_string()`](PcanChannelBuilder::fd_timing_string) instead.
 //!
 //! # Prerequisites
 //!
@@ -66,6 +64,7 @@
 pub mod channel;
 pub mod driver;
 pub mod error;
+pub mod mode;
 
 mod convert;
 mod event;
@@ -73,11 +72,16 @@ mod ffi;
 mod library;
 
 pub use channel::PcanChannel;
-pub use driver::{PcanBusType, PcanChannelBuilder, PcanDriver};
+pub use driver::{
+    ClassicBitrate, PcanBusType, PcanChannelBuilder, PcanDriver, PcanFdTiming, PcanPhaseTiming,
+    PCAN_CLOCK_HZ,
+};
 pub use error::PcanError;
+pub use mode::{Classic, Fd, FdExplicit, Initial};
 
-// Compile-time assertion: channel must be Send so it can be moved across threads.
+// Compile-time assertion: both channel modes must be Send so they can be moved across threads.
 const _: fn() = || {
     const fn assert_send<T: Send>() {}
-    assert_send::<PcanChannel>();
+    assert_send::<PcanChannel<Classic>>();
+    assert_send::<PcanChannel<Fd>>();
 };

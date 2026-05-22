@@ -12,8 +12,8 @@
 //   sudo ip link set can0 up
 //
 // Usage:
-//   cargo run --example receive
-//   cargo run --example receive -- <interface>
+//   cargo run --example socketcan_receive
+//   cargo run --example socketcan_receive -- <interface>
 //
 //   interface: SocketCAN interface name (default: "can0")
 
@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             None => {
-                // Timeout, no frame received — keep waiting
+                // Timeout, no frame received - keep waiting
             }
         }
     }

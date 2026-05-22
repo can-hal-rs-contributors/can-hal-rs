@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use std::os::raw::{c_long, c_ulong};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -24,27 +25,32 @@ use crate::ffi::{
     CAN_STAT_ERROR_PASSIVE, CAN_STAT_ERROR_WARNING,
 };
 use crate::library::KvaserLibrary;
+use crate::mode::{Classic, Fd};
 
 /// An open, on-bus KVASER CAN channel.
-pub struct KvaserChannel {
-    pub(crate) lib: Arc<KvaserLibrary>,
-    pub(crate) handle: i32,
-    pub(crate) fd_mode: bool,
-    pub(crate) event: ReceiveEvent,
+///
+/// Parameterized on a type-state marker:
+/// - [`KvaserChannel<Classic>`] implements [`Transmit`] and [`Receive`].
+/// - [`KvaserChannel<Fd>`] implements [`TransmitFd`] and [`ReceiveFd`].
+///
+/// Both modes implement [`Filterable`] and [`BusStatus`].
+pub struct KvaserChannel<Mode> {
+    lib: Arc<KvaserLibrary>,
+    handle: i32,
+    event: ReceiveEvent,
+    _mode: PhantomData<Mode>,
 }
 
-impl Drop for KvaserChannel {
-    fn drop(&mut self) {
-        // SAFETY: bus_off and close were loaded from canlib; handle is valid from canOpenChannel
-        #[allow(clippy::multiple_unsafe_ops_per_block, clippy::let_underscore_must_use)]
-        unsafe {
-            let _ = (self.lib.bus_off)(self.handle);
-            let _ = (self.lib.close)(self.handle);
+impl<Mode> KvaserChannel<Mode> {
+    pub(crate) const fn new(lib: Arc<KvaserLibrary>, handle: i32, event: ReceiveEvent) -> Self {
+        Self {
+            lib,
+            handle,
+            event,
+            _mode: PhantomData,
         }
     }
-}
 
-impl KvaserChannel {
     /// Non-blocking read. Returns `Ok(None)` if the queue is empty.
     fn read_frame(&mut self) -> Result<Option<Frame>, KvaserError> {
         let mut raw_id: c_long = 0;
@@ -76,11 +82,22 @@ impl KvaserChannel {
     }
 }
 
+impl<Mode> Drop for KvaserChannel<Mode> {
+    fn drop(&mut self) {
+        // SAFETY: bus_off and close were loaded from canlib; handle is valid from canOpenChannel
+        #[allow(clippy::multiple_unsafe_ops_per_block, clippy::let_underscore_must_use)]
+        unsafe {
+            let _ = (self.lib.bus_off)(self.handle);
+            let _ = (self.lib.close)(self.handle);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
-// Transmit
+// Classic-mode trait impls
 // ---------------------------------------------------------------------------
 
-impl Transmit for KvaserChannel {
+impl Transmit for KvaserChannel<Classic> {
     type Error = KvaserError;
 
     #[allow(
@@ -106,11 +123,7 @@ impl Transmit for KvaserChannel {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Receive
-// ---------------------------------------------------------------------------
-
-impl Receive for KvaserChannel {
+impl Receive for KvaserChannel<Classic> {
     type Error = KvaserError;
     type Timestamp = Instant;
 
@@ -118,9 +131,8 @@ impl Receive for KvaserChannel {
         loop {
             match self.read_frame()? {
                 Some(Frame::Can(f)) => return Ok(Timestamped::new(f, Instant::now())),
-                Some(Frame::Fd(_)) => {} // FD frame on classic receive — skip and retry
+                Some(Frame::Fd(_)) => {} // FD frame on classic receive - skip and retry
                 None => {
-                    // Bounded wait: see MAX_POLL_INTERVAL doc for rationale.
                     let _ = self.event.wait(Some(MAX_POLL_INTERVAL))?;
                 }
             }
@@ -131,7 +143,7 @@ impl Receive for KvaserChannel {
         loop {
             match self.read_frame()? {
                 Some(Frame::Can(f)) => return Ok(Some(Timestamped::new(f, Instant::now()))),
-                Some(Frame::Fd(_)) => {} // skip FD frames
+                Some(Frame::Fd(_)) => {}
                 None => return Ok(None),
             }
         }
@@ -143,21 +155,17 @@ impl Receive for KvaserChannel {
     ) -> Result<Option<Timestamped<CanFrame, Instant>>, KvaserError> {
         let deadline = Instant::now() + timeout;
         loop {
-            // Drain the queue before waiting on the event. If we hit an FD frame,
-            // keep reading — there may be a classic frame queued behind it. Only
-            // block on the event when the queue is truly empty.
             loop {
                 match self.read_frame()? {
                     Some(Frame::Can(f)) => return Ok(Some(Timestamped::new(f, Instant::now()))),
-                    Some(Frame::Fd(_)) => {} // skip FD frames, drain queue
-                    None => break,           // queue empty, need to wait
+                    Some(Frame::Fd(_)) => {}
+                    None => break,
                 }
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 return Ok(None);
             }
-            // Bounded wait: see MAX_POLL_INTERVAL doc for rationale.
             let poll_timeout = remaining.min(MAX_POLL_INTERVAL);
             let _ = self.event.wait(Some(poll_timeout))?;
         }
@@ -165,10 +173,10 @@ impl Receive for KvaserChannel {
 }
 
 // ---------------------------------------------------------------------------
-// TransmitFd
+// FD-mode trait impls
 // ---------------------------------------------------------------------------
 
-impl TransmitFd for KvaserChannel {
+impl TransmitFd for KvaserChannel<Fd> {
     type Error = KvaserError;
 
     #[allow(
@@ -178,11 +186,6 @@ impl TransmitFd for KvaserChannel {
         clippy::cast_lossless
     )]
     fn transmit_fd(&mut self, frame: &CanFdFrame) -> Result<(), KvaserError> {
-        if !self.fd_mode {
-            return Err(KvaserError::NotSupported(
-                "channel was not opened in FD mode; call data_bitrate() before connect()".into(),
-            ));
-        }
         let (id, mut flags) = to_canlib_id(frame.id());
         flags |= CAN_MSG_FDF;
         if frame.brs() {
@@ -206,25 +209,15 @@ impl TransmitFd for KvaserChannel {
     }
 }
 
-// ---------------------------------------------------------------------------
-// ReceiveFd
-// ---------------------------------------------------------------------------
-
-impl ReceiveFd for KvaserChannel {
+impl ReceiveFd for KvaserChannel<Fd> {
     type Error = KvaserError;
     type Timestamp = Instant;
 
     fn receive_fd(&mut self) -> Result<Timestamped<Frame, Instant>, KvaserError> {
-        if !self.fd_mode {
-            return Err(KvaserError::NotSupported(
-                "channel was not opened in FD mode; call data_bitrate() before connect()".into(),
-            ));
-        }
         loop {
             match self.read_frame()? {
                 Some(frame) => return Ok(Timestamped::new(frame, Instant::now())),
                 None => {
-                    // Bounded wait: see MAX_POLL_INTERVAL doc for rationale.
                     let _ = self.event.wait(Some(MAX_POLL_INTERVAL))?;
                 }
             }
@@ -232,11 +225,6 @@ impl ReceiveFd for KvaserChannel {
     }
 
     fn try_receive_fd(&mut self) -> Result<Option<Timestamped<Frame, Instant>>, KvaserError> {
-        if !self.fd_mode {
-            return Err(KvaserError::NotSupported(
-                "channel was not opened in FD mode; call data_bitrate() before connect()".into(),
-            ));
-        }
         Ok(self
             .read_frame()?
             .map(|frame| Timestamped::new(frame, Instant::now())))
@@ -246,11 +234,6 @@ impl ReceiveFd for KvaserChannel {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<Timestamped<Frame, Instant>>, KvaserError> {
-        if !self.fd_mode {
-            return Err(KvaserError::NotSupported(
-                "channel was not opened in FD mode; call data_bitrate() before connect()".into(),
-            ));
-        }
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(frame) = self.read_frame()? {
@@ -260,7 +243,6 @@ impl ReceiveFd for KvaserChannel {
             if remaining.is_zero() {
                 return Ok(None);
             }
-            // Bounded wait: see MAX_POLL_INTERVAL doc for rationale.
             let poll_timeout = remaining.min(MAX_POLL_INTERVAL);
             let _ = self.event.wait(Some(poll_timeout))?;
         }
@@ -268,34 +250,51 @@ impl ReceiveFd for KvaserChannel {
 }
 
 // ---------------------------------------------------------------------------
-// Filterable
+// Filterable (both modes)
 // ---------------------------------------------------------------------------
 
-impl Filterable for KvaserChannel {
+impl<Mode> Filterable for KvaserChannel<Mode> {
     type Error = KvaserError;
 
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), KvaserError> {
-        apply_merged_filter(
-            &self.lib,
-            self.handle,
-            filters,
-            |f| f.id.is_standard(),
-            CAN_FILTER_SET_CODE_STD,
-            CAN_FILTER_SET_MASK_STD,
-        )?;
-        apply_merged_filter(
-            &self.lib,
-            self.handle,
-            filters,
-            |f| f.id.is_extended(),
-            CAN_FILTER_SET_CODE_EXT,
-            CAN_FILTER_SET_MASK_EXT,
-        )?;
-        Ok(())
+        // Reset both frame types to accept-all first, so any prior filter is
+        // replaced even when `filters` covers only one frame type (or is
+        // empty). On partial failure (e.g. the extended apply fails after
+        // the standard apply succeeded), revert to accept-all rather than
+        // leaving a half-merged state.
+        self.clear_filters()?;
+        if filters.is_empty() {
+            return Ok(());
+        }
+        let apply = (|| {
+            apply_merged_filter(
+                &self.lib,
+                self.handle,
+                filters,
+                |f| f.id.is_standard(),
+                CAN_FILTER_SET_CODE_STD,
+                CAN_FILTER_SET_MASK_STD,
+            )?;
+            apply_merged_filter(
+                &self.lib,
+                self.handle,
+                filters,
+                |f| f.id.is_extended(),
+                CAN_FILTER_SET_CODE_EXT,
+                CAN_FILTER_SET_MASK_EXT,
+            )?;
+            Ok(())
+        })();
+        if apply.is_err() {
+            // Best-effort: leave filters in accept-all rather than a
+            // half-merged state. Ignore secondary cleanup failure.
+            #[allow(clippy::let_underscore_must_use)]
+            let _ = self.clear_filters();
+        }
+        apply
     }
 
     fn clear_filters(&mut self) -> Result<(), KvaserError> {
-        // mask = 0 means no bits are checked -> every frame passes.
         for &flag in &[
             CAN_FILTER_SET_CODE_STD,
             CAN_FILTER_SET_MASK_STD,
@@ -309,8 +308,40 @@ impl Filterable for KvaserChannel {
     }
 }
 
-/// Merge all filters matching `predicate` into a single (code, mask) pair and
-/// apply it via `canAccept`. No heap allocation.
+/// Compute the merged `(code, mask)` for all filters matching `predicate`.
+/// Returns `None` if no filter matches.
+///
+/// CANlib only supports one hardware filter per frame type, so multiple
+/// user filters must be widened into a single `(code, mask)` that accepts
+/// every ID any input filter would. The merged filter may accept additional
+/// IDs but never fewer. The mask is re-clamped to the ID width to defend
+/// against struct-literal `Filter` construction that bypasses `Filter::new`.
+fn merge_filters(filters: &[Filter], predicate: impl Fn(&Filter) -> bool) -> Option<(u32, u32)> {
+    let mut merged: Option<(u32, u32)> = None;
+    for f in filters.iter().filter(|f| predicate(f)) {
+        let max_id = if f.id.is_extended() {
+            0x1FFF_FFFF
+        } else {
+            0x7FF
+        };
+        let f_mask = f.mask & max_id;
+        let f_code = f.id.raw() & f_mask;
+        merged = Some(match merged {
+            None => (f_code, f_mask),
+            // Widen to cover both (c, m) and (f_code, f_mask): keep only
+            // mask bits present in both filters AND where the codes agree
+            // (codes-differ bits become "don't care").
+            Some((c, m)) => {
+                let new_mask = (m & f_mask) & !(c ^ f_code);
+                let new_code = c & new_mask;
+                (new_code, new_mask)
+            }
+        });
+    }
+    merged
+}
+
+/// Merge filters matching `predicate` and apply via `canAccept`.
 #[allow(clippy::cast_possible_wrap, clippy::cast_lossless)] // c_long is i32 on Windows, i64 on Linux
 fn apply_merged_filter(
     lib: &KvaserLibrary,
@@ -320,31 +351,20 @@ fn apply_merged_filter(
     code_flag: u32,
     mask_flag: u32,
 ) -> Result<(), KvaserError> {
-    let mut merged: Option<(u32, u32)> = None; // (code, mask)
-
-    for f in filters.iter().filter(|f| predicate(f)) {
-        let code = f.id.raw() & f.mask;
-        merged = Some(match merged {
-            None => (code, f.mask),
-            Some((c, m)) => (c & code, m | f.mask),
-        });
-    }
-
-    if let Some((code, mask)) = merged {
+    if let Some((code, mask)) = merge_filters(filters, predicate) {
         // SAFETY: canAccept was loaded from canlib; handle is valid
         check_status(unsafe { (lib.accept)(handle, code as c_long, code_flag) })?;
         // SAFETY: canAccept was loaded from canlib; handle is valid
         check_status(unsafe { (lib.accept)(handle, mask as c_long, mask_flag) })?;
     }
-
     Ok(())
 }
 
 // ---------------------------------------------------------------------------
-// BusStatus
+// BusStatus (both modes)
 // ---------------------------------------------------------------------------
 
-impl BusStatus for KvaserChannel {
+impl<Mode> BusStatus for KvaserChannel<Mode> {
     type Error = KvaserError;
 
     fn bus_state(&self) -> Result<BusState, KvaserError> {
@@ -364,17 +384,96 @@ impl BusStatus for KvaserChannel {
     fn error_counters(&self) -> Result<ErrorCounters, KvaserError> {
         let mut tx_err: u32 = 0;
         let mut rx_err: u32 = 0;
-        // `overrun` counts frames lost due to receive buffer overflow.
-        // It is read to satisfy the CANlib API but is not exposed by `ErrorCounters`.
         let mut overrun: u32 = 0;
         // SAFETY: canReadErrorCounters was loaded from canlib; handle is valid
         check_status(unsafe {
             (self.lib.read_error_counters)(self.handle, &mut tx_err, &mut rx_err, &mut overrun)
         })?;
-        #[allow(clippy::cast_possible_truncation)] // clamped to 255
+        #[allow(clippy::cast_possible_truncation)]
         Ok(ErrorCounters {
             transmit: tx_err.min(255) as u8,
             receive: rx_err.min(255) as u8,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use can_hal::id::CanId;
+
+    fn accepts(code: u32, mask: u32, id: u32) -> bool {
+        id & mask == code
+    }
+
+    fn std_filter(id: u16, mask: u32) -> Filter {
+        Filter {
+            id: CanId::new_standard(id).unwrap(),
+            mask,
+        }
+    }
+
+    #[test]
+    fn merge_single_exact_filter_accepts_only_that_id() {
+        let merged = merge_filters(&[std_filter(0x100, 0x7FF)], |_| true).unwrap();
+        assert!(accepts(merged.0, merged.1, 0x100));
+        assert!(!accepts(merged.0, merged.1, 0x101));
+        assert!(!accepts(merged.0, merged.1, 0x200));
+    }
+
+    #[test]
+    fn merge_two_consecutive_ids_accepts_both() {
+        // Regression: prior implementation used `c & code` / `m | f.mask`
+        // and produced (0x100, 0x7FF) here, dropping 0x101.
+        let merged = merge_filters(
+            &[std_filter(0x100, 0x7FF), std_filter(0x101, 0x7FF)],
+            |_| true,
+        )
+        .unwrap();
+        assert!(accepts(merged.0, merged.1, 0x100));
+        assert!(accepts(merged.0, merged.1, 0x101));
+    }
+
+    #[test]
+    fn merge_with_no_matches_returns_none() {
+        let merged = merge_filters(&[std_filter(0x100, 0x7FF)], |_| false);
+        assert!(merged.is_none());
+    }
+
+    #[test]
+    fn merge_widening_overaccepts_but_never_underaccepts() {
+        // Two filters with one bit of difference share all other bits.
+        let merged = merge_filters(
+            &[std_filter(0x100, 0x7FF), std_filter(0x200, 0x7FF)],
+            |_| true,
+        )
+        .unwrap();
+        // Both originals must still be accepted.
+        assert!(accepts(merged.0, merged.1, 0x100));
+        assert!(accepts(merged.0, merged.1, 0x200));
+    }
+
+    #[test]
+    fn merge_mixed_masks_accepts_all_original_ids() {
+        // Filter A: id=0x100, mask=0x7F0 -> accepts 0x100..=0x10F
+        // Filter B: id=0x200, mask=0x7E0 -> accepts 0x200..=0x21F
+        let merged = merge_filters(
+            &[std_filter(0x100, 0x7F0), std_filter(0x200, 0x7E0)],
+            |_| true,
+        )
+        .unwrap();
+        // Every ID matched by either input must be accepted by the merge.
+        for id in 0x100..=0x10F {
+            assert!(
+                accepts(merged.0, merged.1, id),
+                "merged should accept {id:#x}"
+            );
+        }
+        for id in 0x200..=0x21F {
+            assert!(
+                accepts(merged.0, merged.1, id),
+                "merged should accept {id:#x}"
+            );
+        }
     }
 }

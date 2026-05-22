@@ -52,7 +52,7 @@ pub fn from_canlib_frame(
     let id = from_canlib_id(raw_id, flags)?;
 
     if flags & CAN_MSG_FDF != 0 {
-        // CAN FD frame — dlc is already the byte count from CANlib.
+        // CAN FD frame - dlc is already the byte count from CANlib.
         // Clamp to 64 to prevent panics on out-of-range values from FFI.
         let len = (dlc as usize).min(64);
         let brs = flags & CAN_MSG_BRS != 0;

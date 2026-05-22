@@ -19,7 +19,7 @@ use std::env;
 use std::thread;
 use std::time::Duration;
 
-use can_hal::{CanFdFrame, CanId, ChannelBuilder, Driver, TransmitFd};
+use can_hal::{CanFdFrame, CanId, TransmitFd};
 use can_hal_kvaser::KvaserDriver;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -29,9 +29,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let driver = KvaserDriver::new()?;
     let mut channel = driver
-        .channel(channel_index)?
-        .bitrate(500_000)?
-        .data_bitrate(4_000_000)?
+        .channel(channel_index)
+        .fd(500_000, 4_000_000)?
         .connect()?;
 
     println!("Channel opened at 500 kbit/s nominal, 4 Mbit/s data. Sending FD frames...");

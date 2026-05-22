@@ -35,11 +35,11 @@ extern crate std;
 
 pub mod bus;
 pub mod channel;
-pub mod driver;
 pub mod error;
 pub mod filter;
 pub mod frame;
 pub mod id;
+pub mod timing;
 
 #[cfg(feature = "async")]
 pub mod async_channel;
@@ -47,11 +47,11 @@ pub mod async_channel;
 // Re-export core types at crate root for convenience.
 pub use bus::{BusState, BusStatus, ErrorCounters};
 pub use channel::{Receive, ReceiveFd, Transmit, TransmitFd};
-pub use driver::{ChannelBuilder, Driver, DriverFd};
 pub use error::CanError;
 pub use filter::{Filter, Filterable};
 pub use frame::{CanFdFrame, CanFrame, Frame, Timestamped};
 pub use id::CanId;
+pub use timing::SamplePoint;
 
 #[cfg(feature = "async")]
 pub use async_channel::{AsyncReceive, AsyncReceiveFd, AsyncTransmit, AsyncTransmitFd};
@@ -131,53 +131,6 @@ mod tests {
         ) -> Result<Option<Timestamped<CanFrame, Instant>>, Self::Error> {
             // Mock: just return immediately like try_receive.
             self.try_receive()
-        }
-    }
-
-    // -- Mock driver & builder --
-
-    struct MockDriver;
-    struct MockBuilder {
-        _bitrate: Option<u32>,
-        _data_bitrate: Option<u32>,
-        _sample_point: Option<f32>,
-    }
-
-    impl Driver for MockDriver {
-        type Channel = MockChannel;
-        type Builder = MockBuilder;
-        type Error = MockError;
-
-        fn channel(&self, _index: u32) -> Result<Self::Builder, Self::Error> {
-            Ok(MockBuilder {
-                _bitrate: None,
-                _data_bitrate: None,
-                _sample_point: None,
-            })
-        }
-    }
-
-    impl ChannelBuilder for MockBuilder {
-        type Channel = MockChannel;
-        type Error = MockError;
-
-        fn bitrate(mut self, bitrate: u32) -> Result<Self, Self::Error> {
-            self._bitrate = Some(bitrate);
-            Ok(self)
-        }
-
-        fn data_bitrate(mut self, bitrate: u32) -> Result<Self, Self::Error> {
-            self._data_bitrate = Some(bitrate);
-            Ok(self)
-        }
-
-        fn sample_point(mut self, sample_point: f32) -> Result<Self, Self::Error> {
-            self._sample_point = Some(sample_point);
-            Ok(self)
-        }
-
-        fn connect(self) -> Result<Self::Channel, Self::Error> {
-            Ok(MockChannel::new())
         }
     }
 
@@ -304,27 +257,6 @@ mod tests {
         ch.push_rx(frame.clone());
         let result = ch.receive_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(result.unwrap().into_frame(), frame);
-    }
-
-    #[test]
-    fn mock_driver_builder() {
-        let drv = MockDriver;
-        let mut channel = drv
-            .channel(0)
-            .unwrap()
-            .bitrate(500_000)
-            .unwrap()
-            .data_bitrate(2_000_000)
-            .unwrap()
-            .sample_point(0.875)
-            .unwrap()
-            .connect()
-            .unwrap();
-
-        let id = CanId::new_standard(0x7FF).unwrap();
-        let frame = CanFrame::new(id, &[0xCA, 0xFE]).unwrap();
-        channel.transmit(&frame).unwrap();
-        assert_eq!(channel.tx_log.len(), 1);
     }
 
     // Generic function using trait bounds.

@@ -81,7 +81,7 @@ impl Receive for SocketCanChannel {
                 let frame = convert::from_socketcan_data_frame(&data_frame)?;
                 return Ok(Timestamped::new(frame, now));
             }
-            // Skip FD, remote, and error frames — caller wants classic only.
+            // Skip FD, remote, and error frames - caller wants classic only.
         }
     }
 
@@ -216,6 +216,12 @@ impl Filterable for SocketCanChannel {
     type Error = SocketCanError;
 
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), Self::Error> {
+        // An empty filter set means "no constraint, accept everything",
+        // matching the trait contract. Passing an empty vector to socketcan's
+        // set_filters() would otherwise block all frames.
+        if filters.is_empty() {
+            return self.clear_filters();
+        }
         let sc_filters: Vec<_> = filters.iter().map(convert::to_socketcan_filter).collect();
         self.socket.set_filters(&sc_filters)?;
         Ok(())

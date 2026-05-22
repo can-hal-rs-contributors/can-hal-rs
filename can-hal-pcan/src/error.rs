@@ -55,6 +55,7 @@ impl fmt::Display for PcanStatus {
 
 /// Errors from the PCAN-Basic backend.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PcanError {
     /// The PCAN-Basic library could not be loaded at runtime.
     LibraryLoad(libloading::Error),
@@ -64,8 +65,12 @@ pub enum PcanError {
     InvalidFrame(String),
     /// The requested channel index does not map to a known PCAN handle.
     InvalidChannel(u32),
-    /// The requested bitrate is not a standard PCAN-Basic bitrate.
+    /// A bitrate (in Hz) does not evenly divide the 80 MHz PCAN clock,
+    /// so no exact prescaler exists.
     UnsupportedBitrate(u32),
+    /// No FD timing parameters satisfy the requested bitrate + sample point
+    /// at the 80 MHz PCAN clock within the segment-length constraints.
+    UnsupportedTiming(String),
     /// A platform-specific error (e.g., event creation failed).
     Platform(String),
 }
@@ -77,7 +82,8 @@ impl fmt::Display for PcanError {
             Self::Pcan(status) => write!(f, "{status}"),
             Self::InvalidFrame(msg) => write!(f, "invalid frame: {msg}"),
             Self::InvalidChannel(idx) => write!(f, "invalid PCAN channel index: {idx}"),
-            Self::UnsupportedBitrate(br) => write!(f, "unsupported bitrate: {br} bps"),
+            Self::UnsupportedBitrate(br) => write!(f, "unsupported bitrate {br} bps"),
+            Self::UnsupportedTiming(msg) => write!(f, "unsupported FD timing: {msg}"),
             Self::Platform(msg) => write!(f, "platform error: {msg}"),
         }
     }
