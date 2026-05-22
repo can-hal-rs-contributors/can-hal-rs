@@ -95,7 +95,7 @@ Code that uses `Filterable` must be aware of this.
 |---|---|---|---|---|
 | SocketCAN | `driver.channel_by_name(name).connect()?` (timing OS-managed) | n/a | n/a (no setters) | n/a |
 | PCAN | `driver.channel(0)?.classic(ClassicBitrate::Br500K).connect()?` (enum, infallible) | `driver.channel(0)?.fd(500_000, 4_000_000)?.connect()?` | `<Fd>` only (none in classic; use `fd(rate, rate)` for custom classic timing) | `<Initial>::fd_explicit(PcanFdTiming)` -> `<FdExplicit>` |
-| Kvaser | `driver.channel(0).classic(500_000)?.connect()?` (`channel()` infallible; all four bitrate-taking transitions - `classic`, `fd`, `classic_explicit`, `fd_explicit` - fail on 80 MHz divisibility; the `_explicit` variants additionally check segment bounds and the `(bitrate * (1 + tseg1 + tseg2))` divisibility) | `driver.channel(0).fd(500_000, 4_000_000)?.connect()?` | both `<Classic>` and `<Fd>` | `<Initial>::classic_explicit(hz, BusParams)?` / `fd_explicit(hz, hz, BusParams, BusParamsFd)?` |
+| Kvaser | `driver.channel(0).classic(500_000)?.connect()?` (`channel()` infallible; all four bitrate-taking transitions - `classic`, `fd`, `classic_explicit`, `fd_explicit` - fail on 80 MHz divisibility; the `_explicit` variants additionally check segment bounds, `(bitrate * (1 + tseg1 + tseg2))` divisibility, and prescaler `[1, 1024]`) | `driver.channel(0).fd(500_000, 4_000_000)?.connect()?` | both `<Classic>` and `<Fd>` | `<Initial>::classic_explicit(hz, BusParams)?` / `fd_explicit(hz, hz, BusParams, BusParamsFd)?` |
 
 ## Build and Development
 

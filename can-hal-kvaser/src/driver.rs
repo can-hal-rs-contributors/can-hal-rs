@@ -533,13 +533,13 @@ fn open_fd(
             let data_tq = to_data_tq(data_hz, fd_params)?;
             // SAFETY: canSetBusParamsFdTq was loaded from canlib; handle is valid
             let status = unsafe { (set_fd_tq)(handle, nominal_tq, data_tq) };
-            if status >= 0 {
-                false
-            } else if status == CAN_ERR_NOT_SUPPORTED {
+            if status == CAN_ERR_NOT_SUPPORTED {
+                // Some linuxcan builds export the symbol but reject it for
+                // certain hardware/firmware. Fall through to the legacy path.
                 true
             } else {
                 check_status(status)?;
-                unreachable!()
+                false
             }
         } else {
             true
