@@ -307,9 +307,15 @@ impl KvaserChannelBuilder<Initial> {
     /// next call must be [`connect`](KvaserChannelBuilder::connect). The
     /// `bitrate_hz` is still required because CANlib's `canSetBusParams`
     /// takes the frequency as input and derives the prescaler from
-    /// `KVASER_CLOCK_HZ / (bitrate_hz * (1 + tseg1 + tseg2))`. Returns `Err`
-    /// if `bitrate_hz` does not evenly divide the 80 MHz CANlib clock, so
-    /// the failure surfaces here instead of at `connect()`.
+    /// `KVASER_CLOCK_HZ / (bitrate_hz * (1 + tseg1 + tseg2))`.
+    ///
+    /// Returns `Err` if any of the following don't hold (each surfaces at
+    /// the call site rather than at `connect()`):
+    ///
+    /// - `bitrate_hz` evenly divides the 80 MHz CANlib clock,
+    /// - `tseg1` is in `[1, 256]` and `tseg2` is in `[1, 128]`,
+    /// - `bitrate_hz * (1 + tseg1 + tseg2)` evenly divides the clock, and
+    /// - the resulting prescaler is in `[1, 1024]`.
     pub fn classic_explicit(
         self,
         bitrate_hz: u32,
@@ -323,13 +329,7 @@ impl KvaserChannelBuilder<Initial> {
         // combination yields an integer prescaler. Without these checks,
         // out-of-range params would otherwise fail at `connect()` with a
         // raw CANlib status code.
-        check_segment_bounds(
-            params.tseg1,
-            params.tseg2,
-            NOMINAL_MAX_TSEG1,
-            NOMINAL_MAX_TSEG2,
-            "nominal",
-        )?;
+        check_segment_bounds(params.tseg1, params.tseg2, TimingPhase::Nominal)?;
         let tq = total_tq(params.tseg1, params.tseg2)?;
         let _ = compute_prescaler(bitrate_hz, tq)?;
         Ok(KvaserChannelBuilder {
@@ -344,9 +344,17 @@ impl KvaserChannelBuilder<Initial> {
     /// timing.
     ///
     /// Bypasses the timing solver. The returned builder has no setters; the
-    /// next call must be [`connect`](KvaserChannelBuilder::connect). Returns
-    /// `Err` if either bitrate does not evenly divide the 80 MHz CANlib
-    /// clock.
+    /// next call must be [`connect`](KvaserChannelBuilder::connect).
+    ///
+    /// Returns `Err` if any of the following don't hold (each surfaces at
+    /// the call site rather than at `connect()`):
+    ///
+    /// - both `nominal_hz` and `data_hz` evenly divide the 80 MHz clock,
+    /// - nominal `tseg1` in `[1, 256]`, `tseg2` in `[1, 128]`,
+    /// - data `tseg1` in `[1, 32]`, `tseg2` in `[1, 16]`,
+    /// - `bitrate * (1 + tseg1 + tseg2)` evenly divides the clock for each
+    ///   phase, and
+    /// - each resulting prescaler is in `[1, 1024]`.
     pub fn fd_explicit(
         self,
         nominal_hz: u32,
@@ -362,20 +370,8 @@ impl KvaserChannelBuilder<Initial> {
         }
         // Eagerly validate segment-length bounds and that the (bitrate,
         // segments) combinations yield integer prescalers within range.
-        check_segment_bounds(
-            params.tseg1,
-            params.tseg2,
-            NOMINAL_MAX_TSEG1,
-            NOMINAL_MAX_TSEG2,
-            "nominal",
-        )?;
-        check_segment_bounds(
-            fd_params.tseg1,
-            fd_params.tseg2,
-            DATA_MAX_TSEG1,
-            DATA_MAX_TSEG2,
-            "data",
-        )?;
+        check_segment_bounds(params.tseg1, params.tseg2, TimingPhase::Nominal)?;
+        check_segment_bounds(fd_params.tseg1, fd_params.tseg2, TimingPhase::Data)?;
         let nominal_tq = total_tq(params.tseg1, params.tseg2)?;
         let _ = compute_prescaler(nominal_hz, nominal_tq)?;
         let data_tq_val = total_tq(fd_params.tseg1, fd_params.tseg2)?;
@@ -635,21 +631,20 @@ fn total_tq(tseg1: u32, tseg2: u32) -> Result<u32, KvaserError> {
 }
 
 /// Verify segment values fit the controller's range for the given phase.
-fn check_segment_bounds(
-    tseg1: u32,
-    tseg2: u32,
-    max_tseg1: u32,
-    max_tseg2: u32,
-    phase: &'static str,
-) -> Result<(), KvaserError> {
+fn check_segment_bounds(tseg1: u32, tseg2: u32, phase: TimingPhase) -> Result<(), KvaserError> {
+    let (max_tseg1, max_tseg2) = match phase {
+        TimingPhase::Nominal => (NOMINAL_MAX_TSEG1, NOMINAL_MAX_TSEG2),
+        TimingPhase::Data => (DATA_MAX_TSEG1, DATA_MAX_TSEG2),
+    };
+    let phase_name = phase.as_str();
     if tseg1 == 0 || tseg1 > max_tseg1 {
         return Err(KvaserError::UnsupportedTiming(format!(
-            "{phase} tseg1={tseg1} out of range [1, {max_tseg1}]"
+            "{phase_name} tseg1={tseg1} out of range [1, {max_tseg1}]"
         )));
     }
     if tseg2 == 0 || tseg2 > max_tseg2 {
         return Err(KvaserError::UnsupportedTiming(format!(
-            "{phase} tseg2={tseg2} out of range [1, {max_tseg2}]"
+            "{phase_name} tseg2={tseg2} out of range [1, {max_tseg2}]"
         )));
     }
     Ok(())
@@ -774,6 +769,32 @@ mod tests {
         assert!(total_tq(u32::MAX, 1).is_err());
         assert!(total_tq(u32::MAX, u32::MAX).is_err());
         assert_eq!(total_tq(13, 6).unwrap(), 20);
+    }
+
+    #[test]
+    fn check_segment_bounds_accepts_in_range() {
+        assert!(check_segment_bounds(13, 6, TimingPhase::Nominal).is_ok());
+        assert!(check_segment_bounds(7, 2, TimingPhase::Data).is_ok());
+    }
+
+    #[test]
+    fn check_segment_bounds_rejects_zero() {
+        assert!(check_segment_bounds(0, 6, TimingPhase::Nominal).is_err());
+        assert!(check_segment_bounds(13, 0, TimingPhase::Nominal).is_err());
+    }
+
+    #[test]
+    fn check_segment_bounds_rejects_nominal_above_max() {
+        // tseg1 max for nominal is 256, tseg2 max is 128.
+        assert!(check_segment_bounds(257, 6, TimingPhase::Nominal).is_err());
+        assert!(check_segment_bounds(13, 129, TimingPhase::Nominal).is_err());
+    }
+
+    #[test]
+    fn check_segment_bounds_rejects_data_above_max() {
+        // tseg1 max for data is 32, tseg2 max is 16.
+        assert!(check_segment_bounds(33, 2, TimingPhase::Data).is_err());
+        assert!(check_segment_bounds(7, 17, TimingPhase::Data).is_err());
     }
 
     #[test]

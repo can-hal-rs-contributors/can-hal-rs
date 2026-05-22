@@ -445,4 +445,28 @@ mod tests {
         assert!(accepts(merged.0, merged.1, 0x100));
         assert!(accepts(merged.0, merged.1, 0x200));
     }
+
+    #[test]
+    fn merge_mixed_masks_accepts_all_original_ids() {
+        // Filter A: id=0x100, mask=0x7F0 -> accepts 0x100..=0x10F
+        // Filter B: id=0x200, mask=0x7E0 -> accepts 0x200..=0x21F
+        let merged = merge_filters(
+            &[std_filter(0x100, 0x7F0), std_filter(0x200, 0x7E0)],
+            |_| true,
+        )
+        .unwrap();
+        // Every ID matched by either input must be accepted by the merge.
+        for id in 0x100..=0x10F {
+            assert!(
+                accepts(merged.0, merged.1, id),
+                "merged should accept {id:#x}"
+            );
+        }
+        for id in 0x200..=0x21F {
+            assert!(
+                accepts(merged.0, merged.1, id),
+                "merged should accept {id:#x}"
+            );
+        }
+    }
 }

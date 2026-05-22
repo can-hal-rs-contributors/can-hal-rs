@@ -45,6 +45,11 @@ pub trait Filterable {
     ///
     /// Replaces any previously configured filters. An empty slice is equivalent
     /// to calling [`clear_filters`](Self::clear_filters).
+    ///
+    /// On `Err`, implementations should make a best-effort attempt to leave
+    /// the channel in an accept-all state rather than a half-applied one.
+    /// If that secondary cleanup itself fails, the filter state is
+    /// unspecified.
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), Self::Error>;
 
     /// Remove all acceptance filters (accept everything).
