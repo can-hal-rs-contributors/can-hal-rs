@@ -57,7 +57,8 @@ impl fmt::Display for KvaserError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::LibraryLoad(e) => write!(f, "failed to load CANlib: {e}"),
-            Self::Canlib(s) => write!(f, "CANlib error: {s}"),
+            // KvaserStatus's Display already includes "CANlib error N (desc)".
+            Self::Canlib(s) => write!(f, "{s}"),
             Self::InvalidFrame(msg) => write!(f, "invalid frame: {msg}"),
             Self::UnsupportedBitrate(hz) => {
                 write!(f, "unsupported bitrate {hz} bps")

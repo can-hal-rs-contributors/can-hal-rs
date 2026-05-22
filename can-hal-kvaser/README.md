@@ -59,6 +59,43 @@ let frame = CanFdFrame::new(id, &[0xDE, 0xAD], true, false).unwrap();
 channel.transmit_fd(&frame).unwrap();
 ```
 
+## Sample points
+
+`.classic(...)` and `.fd(...)` default to a 70% nominal and 80% data-phase sample point. Override per phase with `SamplePoint`:
+
+```rust,no_run
+use can_hal::SamplePoint;
+use can_hal_kvaser::KvaserDriver;
+
+let driver = KvaserDriver::new().unwrap();
+let mut channel = driver
+    .channel(0)
+    .fd(500_000, 4_000_000)
+    .unwrap()
+    .sample_point(SamplePoint::PCT_87_5)
+    .data_sample_point(SamplePoint::PCT_75)
+    .connect()
+    .unwrap();
+```
+
+## Raw timing
+
+For full control over `(tseg1, tseg2, sjw)` and the `noSamp` / `syncMode` flags, transition from `<Initial>` to `<ClassicExplicit>` / `<FdExplicit>` instead:
+
+```rust,no_run
+use can_hal_kvaser::{BusParams, BusParamsFd, KvaserDriver};
+
+let driver = KvaserDriver::new().unwrap();
+let nominal = BusParams { tseg1: 13, tseg2: 6, sjw: 4, no_samp: 1, sync_mode: 0 };
+let data = BusParamsFd { tseg1: 7, tseg2: 2, sjw: 2 };
+let mut channel = driver
+    .channel(0)
+    .fd_explicit(500_000, 4_000_000, nominal, data)
+    .unwrap()
+    .connect()
+    .unwrap();
+```
+
 ## Prerequisites
 
 The CANlib library must be installed:

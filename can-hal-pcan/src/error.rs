@@ -65,11 +65,11 @@ pub enum PcanError {
     InvalidFrame(String),
     /// The requested channel index does not map to a known PCAN handle.
     InvalidChannel(u32),
-    /// The requested bitrate is not a standard PCAN-Basic bitrate.
+    /// A bitrate (in Hz) does not evenly divide the 80 MHz PCAN clock,
+    /// so no exact prescaler exists.
     UnsupportedBitrate(u32),
     /// No FD timing parameters satisfy the requested bitrate + sample point
-    /// at the 80 MHz PCAN clock (e.g., a nominal or data bitrate that does
-    /// not evenly divide the clock).
+    /// at the 80 MHz PCAN clock within the segment-length constraints.
     UnsupportedTiming(String),
     /// A platform-specific error (e.g., event creation failed).
     Platform(String),

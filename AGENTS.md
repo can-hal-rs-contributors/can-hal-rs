@@ -95,7 +95,7 @@ Code that uses `Filterable` must be aware of this.
 |---|---|---|---|---|
 | SocketCAN | `driver.channel_by_name(name).connect()?` (timing OS-managed) | n/a | n/a (no setters) | n/a |
 | PCAN | `driver.channel(0)?.classic(ClassicBitrate::Br500K).connect()?` (enum, infallible) | `driver.channel(0)?.fd(500_000, 4_000_000)?.connect()?` | `<Fd>` only (none in classic; use `fd(rate, rate)` for custom classic timing) | `<Initial>::fd_explicit(PcanFdTiming)` -> `<FdExplicit>` |
-| Kvaser | `driver.channel(0)?.classic(500_000)?.connect()?` (u32, fallible via solver) | `driver.channel(0)?.fd(500_000, 4_000_000)?.connect()?` | both `<Classic>` and `<Fd>` | `<Initial>::classic_explicit(hz, BusParams)?` / `fd_explicit(hz, hz, BusParams, BusParamsFd)?` |
+| Kvaser | `driver.channel(0).classic(500_000)?.connect()?` (`channel()` infallible; `.classic()` fails on 80 MHz divisibility) | `driver.channel(0).fd(500_000, 4_000_000)?.connect()?` | both `<Classic>` and `<Fd>` | `<Initial>::classic_explicit(hz, BusParams)?` / `fd_explicit(hz, hz, BusParams, BusParamsFd)?` |
 
 ## Build and Development
 
@@ -153,7 +153,7 @@ cargo run -p can-hal-isotp-example
 ```bash
 sudo modprobe vcan
 sudo ip link add dev vcan0 type vcan
-sudo ip link set up vcan0
+sudo ip link set vcan0 up
 ```
 
 ## Hardware-in-the-Loop (HIL) Testing
@@ -224,7 +224,7 @@ All three backends follow the same pattern:
 |---|---|
 | `driver.rs` | Concrete driver type + typestate `ChannelBuilder<Mode>` |
 | `mode.rs` | Type-state markers (`Initial`, `Classic`, `Fd`, `*Explicit`) with private state |
-| `channel.rs` | `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, `BusStatus` impls (split by mode) |
+| `channel.rs` | `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable` impls (split by mode); `BusStatus` on PCAN/Kvaser only |
 | `convert.rs` | Conversions between `can-hal` frame types and vendor-specific types |
 | `error.rs` | Backend error type implementing `CanError` |
 | `ffi.rs` | FFI bindings (PCAN and Kvaser only) |
@@ -247,8 +247,8 @@ The ISO-TP crate implements ISO 15765-2 segmentation and reassembly, generic ove
 `Transmit + Receive` channel.
 
 **Key types:**
-- `IsoTpChannel<C>` - classic CAN transport
-- `IsoTpFdChannel<C>` - CAN FD transport (up to 4095 bytes per message)
+- `IsoTpChannel<C>` - classic CAN transport (up to 4095 bytes via short FF; up to 4 GB via long FF)
+- `IsoTpFdChannel<C>` - CAN FD transport (same limits)
 - `IsoTpConfig` - TX/RX CAN IDs, addressing mode
 - `AddressingMode` - Normal, Extended, Functional
 

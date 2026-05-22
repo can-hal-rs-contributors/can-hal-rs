@@ -47,7 +47,7 @@ const DATA_MAX_TSEG2: u32 = 16;
 const MAX_PRESCALER: u32 = 1024;
 
 /// Nominal bus parameters: (tseg1, tseg2, sjw, noSamp, syncMode).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BusParams {
     pub tseg1: u32,
     pub tseg2: u32,
@@ -57,7 +57,7 @@ pub struct BusParams {
 }
 
 /// FD data-phase bus parameters: (tseg1, tseg2, sjw).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BusParamsFd {
     pub tseg1: u32,
     pub tseg2: u32,
@@ -558,37 +558,60 @@ fn open_fd(
 // ---------------------------------------------------------------------------
 
 /// Convert nominal bus parameters + bitrate to a `KvBusParamsTq`.
-#[allow(clippy::cast_possible_wrap)] // u32 timing values fit in i32
+///
+/// Returns `UnsupportedTiming` if the segment values are large enough to
+/// overflow u32 addition, or if any field doesn't fit in `i32` (CANlib's
+/// FFI takes signed types).
 fn to_nominal_tq(bitrate_hz: u32, p: &BusParams) -> Result<KvBusParamsTq, KvaserError> {
-    let tq = 1 + p.tseg1 + p.tseg2;
+    let tq = total_tq(p.tseg1, p.tseg2)?;
     let prescaler = compute_prescaler(bitrate_hz, tq)?;
     Ok(KvBusParamsTq {
-        tq: tq as i32,
-        phase1: p.tseg1 as i32,
-        phase2: p.tseg2 as i32,
-        sjw: p.sjw as i32,
+        tq: u32_to_i32(tq, "tq")?,
+        phase1: u32_to_i32(p.tseg1, "tseg1")?,
+        phase2: u32_to_i32(p.tseg2, "tseg2")?,
+        sjw: u32_to_i32(p.sjw, "sjw")?,
         prop: 0,
         prescaler,
     })
 }
 
 /// Convert FD data-phase bus parameters + bitrate to a `KvBusParamsTq`.
-#[allow(clippy::cast_possible_wrap)] // u32 timing values fit in i32
 fn to_data_tq(bitrate_hz: u32, p: &BusParamsFd) -> Result<KvBusParamsTq, KvaserError> {
-    let tq = 1 + p.tseg1 + p.tseg2;
+    let tq = total_tq(p.tseg1, p.tseg2)?;
     let prescaler = compute_prescaler(bitrate_hz, tq)?;
     Ok(KvBusParamsTq {
-        tq: tq as i32,
-        phase1: p.tseg1 as i32,
-        phase2: p.tseg2 as i32,
-        sjw: p.sjw as i32,
+        tq: u32_to_i32(tq, "tq")?,
+        phase1: u32_to_i32(p.tseg1, "tseg1")?,
+        phase2: u32_to_i32(p.tseg2, "tseg2")?,
+        sjw: u32_to_i32(p.sjw, "sjw")?,
         prop: 0,
         prescaler,
     })
 }
 
+fn total_tq(tseg1: u32, tseg2: u32) -> Result<u32, KvaserError> {
+    tseg1
+        .checked_add(tseg2)
+        .and_then(|sum| sum.checked_add(1))
+        .ok_or_else(|| {
+            KvaserError::UnsupportedTiming(format!(
+                "tseg1={tseg1} + tseg2={tseg2} overflows total TQ"
+            ))
+        })
+}
+
+#[allow(clippy::cast_possible_wrap)] // checked above
+fn u32_to_i32(value: u32, field: &str) -> Result<i32, KvaserError> {
+    if value > i32::MAX as u32 {
+        Err(KvaserError::UnsupportedTiming(format!(
+            "{field}={value} does not fit in i32"
+        )))
+    } else {
+        Ok(value as i32)
+    }
+}
+
 /// Derive the prescaler from the clock, bitrate, and total time quanta.
-#[allow(clippy::cast_possible_truncation)] // prescaler fits in i32 for valid CAN bitrates
 fn compute_prescaler(bitrate_hz: u32, tq: u32) -> Result<i32, KvaserError> {
     let bit_time = u64::from(bitrate_hz) * u64::from(tq);
     if bit_time == 0 || u64::from(KVASER_CLOCK_HZ) % bit_time != 0 {
@@ -597,7 +620,14 @@ fn compute_prescaler(bitrate_hz: u32, tq: u32) -> Result<i32, KvaserError> {
              (prescaler would be non-integer)"
         )));
     }
-    Ok((u64::from(KVASER_CLOCK_HZ) / bit_time) as i32)
+    let prescaler = u64::from(KVASER_CLOCK_HZ) / bit_time;
+    if prescaler > i32::MAX as u64 {
+        return Err(KvaserError::UnsupportedTiming(format!(
+            "prescaler {prescaler} for bitrate={bitrate_hz} Hz, tq={tq} does not fit in i32"
+        )));
+    }
+    #[allow(clippy::cast_possible_truncation)] // bounded above
+    Ok(prescaler as i32)
 }
 
 #[cfg(test)]

@@ -65,6 +65,7 @@ pub enum PcanBusType {
 /// constants. Modeling them as an enum makes invalid bitrates
 /// unrepresentable at compile time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ClassicBitrate {
     Br1M,
     Br800K,
@@ -377,14 +378,10 @@ impl PcanChannelBuilder<Initial> {
     /// (80%); override on the returned builder.
     pub fn fd(self, nominal_hz: u32, data_hz: u32) -> Result<PcanChannelBuilder<Fd>, PcanError> {
         if nominal_hz == 0 || PCAN_CLOCK_HZ % nominal_hz != 0 {
-            return Err(PcanError::UnsupportedTiming(format!(
-                "nominal bitrate {nominal_hz} Hz does not divide {PCAN_CLOCK_HZ} Hz"
-            )));
+            return Err(PcanError::UnsupportedBitrate(nominal_hz));
         }
         if data_hz == 0 || PCAN_CLOCK_HZ % data_hz != 0 {
-            return Err(PcanError::UnsupportedTiming(format!(
-                "data bitrate {data_hz} Hz does not divide {PCAN_CLOCK_HZ} Hz"
-            )));
+            return Err(PcanError::UnsupportedBitrate(data_hz));
         }
         Ok(PcanChannelBuilder {
             lib: self.lib,

@@ -35,9 +35,9 @@ use crate::mode::{Classic, Fd};
 ///
 /// Both modes implement [`Filterable`] and [`BusStatus`].
 pub struct KvaserChannel<Mode> {
-    pub(crate) lib: Arc<KvaserLibrary>,
-    pub(crate) handle: i32,
-    pub(crate) event: ReceiveEvent,
+    lib: Arc<KvaserLibrary>,
+    handle: i32,
+    event: ReceiveEvent,
     _mode: PhantomData<Mode>,
 }
 
@@ -257,6 +257,11 @@ impl<Mode> Filterable for KvaserChannel<Mode> {
     type Error = KvaserError;
 
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), KvaserError> {
+        // An empty filter set means "no constraint, accept everything",
+        // matching the PCAN backend's behavior.
+        if filters.is_empty() {
+            return self.clear_filters();
+        }
         apply_merged_filter(
             &self.lib,
             self.handle,
