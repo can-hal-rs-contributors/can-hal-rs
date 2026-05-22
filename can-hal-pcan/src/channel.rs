@@ -41,16 +41,15 @@ pub struct PcanChannel<Mode> {
 }
 
 impl<Mode> PcanChannel<Mode> {
-    /// Called by the builder after `CAN_Initialize` / `CAN_InitializeFD`
-    /// succeeds.
-    pub(crate) fn new(lib: Arc<PcanLibrary>, handle: u16) -> Result<Self, PcanError> {
-        let event = ReceiveEvent::new(lib.clone(), handle)?;
-        Ok(Self {
+    /// Infallible constructor. Called by the builder after both
+    /// `CAN_Initialize{,FD}` and `ReceiveEvent::new` have succeeded.
+    pub(crate) const fn new(lib: Arc<PcanLibrary>, handle: u16, event: ReceiveEvent) -> Self {
+        Self {
             lib,
             handle,
             event,
             _mode: PhantomData,
-        })
+        }
     }
 }
 
@@ -212,6 +211,11 @@ impl ReceiveFd for PcanChannel<Fd> {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<Timestamped<Frame, Instant>>, Self::Error> {
+        // Cap poll interval to avoid missing frames when the event fd is
+        // edge-triggered: the signal from an earlier frame (e.g. a TX echo)
+        // can mask the arrival of a later frame.
+        const MAX_POLL: Duration = Duration::from_millis(50);
+
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(frame) = self.read_fd()? {
@@ -221,10 +225,8 @@ impl ReceiveFd for PcanChannel<Fd> {
             if now >= deadline {
                 return Ok(None);
             }
-            let signaled = self.event.wait(Some(deadline - now))?;
-            if !signaled {
-                return Ok(self.read_fd()?.map(|f| Timestamped::new(f, Instant::now())));
-            }
+            let wait_dur = (deadline - now).min(MAX_POLL);
+            let _ = self.event.wait(Some(wait_dur))?;
         }
     }
 }

@@ -30,55 +30,58 @@ Each backend exposes a concrete driver with a typestate-driven builder: `.channe
 
 ## Example
 
-```rust
-use can_hal::{CanId, CanFrame, Transmit, Receive};
+```rust,no_run
+use can_hal::{CanId, CanFrame, Transmit};
 use can_hal_socketcan::SocketCanDriver;
 
 let driver = SocketCanDriver::new();
-let mut channel = driver.channel_by_name("can0").connect()?;
+let mut channel = driver.channel_by_name("can0").connect().unwrap();
 
-let id = CanId::new_standard(0x100)?;
-let frame = CanFrame::new(id, &[0x01, 0x02, 0x03])?;
-channel.transmit(&frame)?;
+let id = CanId::new_standard(0x100).unwrap();
+let frame = CanFrame::new(id, &[0x01, 0x02, 0x03]).unwrap();
+channel.transmit(&frame).unwrap();
 ```
 
 SocketCAN bitrate is OS-managed (`ip link set ... bitrate ...`). For PCAN, classic bitrate is a checked enum:
 
-```rust
+```rust,no_run
 use can_hal_pcan::{PcanDriver, ClassicBitrate};
-let driver = PcanDriver::new()?;
-let mut channel = driver.channel(0)?.classic(ClassicBitrate::Br500K).connect()?;
+let driver = PcanDriver::new().unwrap();
+let mut channel = driver.channel(0).unwrap().classic(ClassicBitrate::Br500K).connect().unwrap();
 ```
 
 For Kvaser, classic bitrate is a `u32` validated against the 80 MHz CANlib clock:
 
-```rust
+```rust,no_run
 use can_hal_kvaser::KvaserDriver;
-let driver = KvaserDriver::new()?;
-let mut channel = driver.channel(0)?.classic(500_000)?.connect()?;
+let driver = KvaserDriver::new().unwrap();
+let mut channel = driver.channel(0).classic(500_000).unwrap().connect().unwrap();
 ```
 
-CAN FD on either hardware-backed crate:
+CAN FD on either hardware-backed crate (here, PCAN):
 
-```rust
-let mut channel = driver.channel(0)?.fd(500_000, 4_000_000)?.connect()?;
+```rust,no_run
+use can_hal_pcan::PcanDriver;
+let driver = PcanDriver::new().unwrap();
+let mut channel = driver.channel(0).unwrap().fd(500_000, 4_000_000).unwrap().connect().unwrap();
 ```
 
 ## ISO-TP
 
 Send and receive multi-frame payloads over any `can-hal-rs` backend:
 
-```rust
+```rust,no_run
 use can_hal::CanId;
 use can_hal_isotp::{IsoTpChannel, IsoTpConfig};
-
+# fn example<C: can_hal::Transmit<Error = E> + can_hal::Receive<Error = E>, E: can_hal::CanError>(channel: C) {
 let config = IsoTpConfig::new(
-    CanId::new_standard(0x7E0)?,
-    CanId::new_standard(0x7E8)?,
+    CanId::new_standard(0x7E0).unwrap(),
+    CanId::new_standard(0x7E8).unwrap(),
 );
 let mut isotp = IsoTpChannel::new(channel, config);
-isotp.send(&[0x10, 0x01])?;
-let response = isotp.receive()?;
+isotp.send(&[0x10, 0x01]).unwrap();
+let response = isotp.receive().unwrap();
+# }
 ```
 
 Supports normal, extended, and functional addressing. CAN FD via `IsoTpFdChannel`. Async via the `async` feature flag.

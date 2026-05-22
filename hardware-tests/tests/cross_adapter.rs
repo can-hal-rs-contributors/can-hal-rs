@@ -50,7 +50,6 @@ fn test_pcan_to_kvaser_raw_frame() {
         let driver = can_hal_kvaser::KvaserDriver::new().unwrap();
         let mut channel = driver
             .channel(0)
-            .unwrap()
             .classic(500_000)
             .unwrap()
             .connect()
@@ -109,7 +108,6 @@ fn test_kvaser_to_pcan_raw_frame() {
         let driver = can_hal_kvaser::KvaserDriver::new().unwrap();
         driver
             .channel(0)
-            .unwrap()
             .classic(500_000)
             .unwrap()
             .connect()
@@ -138,7 +136,6 @@ fn isotp_transfer_pcan_to_kvaser(payload: &[u8]) {
         let driver = can_hal_kvaser::KvaserDriver::new().unwrap();
         let channel = driver
             .channel(0)
-            .unwrap()
             .classic(500_000)
             .unwrap()
             .connect()
@@ -196,7 +193,6 @@ fn isotp_transfer_kvaser_to_pcan(payload: &[u8]) {
         let driver = can_hal_kvaser::KvaserDriver::new().unwrap();
         let channel = driver
             .channel(0)
-            .unwrap()
             .classic(500_000)
             .unwrap()
             .connect()
@@ -221,7 +217,6 @@ fn test_kvaser_open_no_thread() {
     let driver = can_hal_kvaser::KvaserDriver::new().unwrap();
     let _channel = driver
         .channel(0)
-        .unwrap()
         .classic(500_000)
         .unwrap()
         .connect()

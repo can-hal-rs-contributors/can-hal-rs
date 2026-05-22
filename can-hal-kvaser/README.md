@@ -27,7 +27,6 @@ use can_hal_kvaser::KvaserDriver;
 let driver = KvaserDriver::new().expect("CANlib library not found");
 let mut channel = driver
     .channel(0)
-    .unwrap()
     .classic(500_000)
     .unwrap()
     .connect()
@@ -50,7 +49,6 @@ use can_hal_kvaser::KvaserDriver;
 let driver = KvaserDriver::new().unwrap();
 let mut channel = driver
     .channel(0)
-    .unwrap()
     .fd(500_000, 2_000_000)
     .unwrap()
     .connect()

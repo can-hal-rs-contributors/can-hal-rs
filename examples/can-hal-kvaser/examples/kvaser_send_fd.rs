@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let driver = KvaserDriver::new()?;
     let mut channel = driver
-        .channel(channel_index)?
+        .channel(channel_index)
         .fd(500_000, 4_000_000)?
         .connect()?;
 

@@ -139,7 +139,9 @@ fn solve_phase_timing(
         let tq_distance = (i64::from(total_tq) - i64::from(preferred_tq)).unsigned_abs() as u32;
         let score = sp_error + (tq_distance as f32) * 0.001;
 
-        let sjw = tseg2.min(DEFAULT_SJW_CAP);
+        // ISO 11898-1 requires SJW <= min(tseg1, tseg2). Cap by tseg1 too so
+        // the solver never emits a value the hardware will reject.
+        let sjw = tseg1.min(tseg2).min(DEFAULT_SJW_CAP);
 
         if best
             .as_ref()
@@ -157,7 +159,7 @@ fn solve_phase_timing(
 fn solve_nominal(bitrate_hz: u32, sample_point: SamplePoint) -> Result<BusParams, KvaserError> {
     let (tseg1, tseg2, sjw) = solve_phase_timing(bitrate_hz, sample_point, TimingPhase::Nominal)
         .ok_or_else(|| {
-            KvaserError::NotSupported(format!(
+            KvaserError::UnsupportedTiming(format!(
                 "no Kvaser {} timing satisfies bitrate={} Hz, sample_point={}",
                 TimingPhase::Nominal.as_str(),
                 bitrate_hz,
@@ -176,7 +178,7 @@ fn solve_nominal(bitrate_hz: u32, sample_point: SamplePoint) -> Result<BusParams
 fn solve_data(bitrate_hz: u32, sample_point: SamplePoint) -> Result<BusParamsFd, KvaserError> {
     let (tseg1, tseg2, sjw) = solve_phase_timing(bitrate_hz, sample_point, TimingPhase::Data)
         .ok_or_else(|| {
-            KvaserError::NotSupported(format!(
+            KvaserError::UnsupportedTiming(format!(
                 "no Kvaser {} timing satisfies bitrate={} Hz, sample_point={}",
                 TimingPhase::Data.as_str(),
                 bitrate_hz,
@@ -199,7 +201,6 @@ fn solve_data(bitrate_hz: u32, sample_point: SamplePoint) -> Result<BusParamsFd,
 /// let driver = KvaserDriver::new().expect("CANlib not found");
 /// let mut channel = driver
 ///     .channel(0)
-///     .unwrap()
 ///     .classic(500_000)
 ///     .unwrap()
 ///     .connect()
@@ -225,14 +226,18 @@ impl KvaserDriver {
     }
 
     /// Begin configuring the channel at the given 0-based index.
+    ///
+    /// Infallible: invalid indices (negative drivers, missing hardware)
+    /// surface at `connect()` when CANlib's `canOpenChannel` is called.
+    #[must_use]
     #[allow(clippy::cast_possible_wrap)] // channel index is small, fits in i32
-    pub fn channel(&self, index: u32) -> Result<KvaserChannelBuilder<Initial>, KvaserError> {
-        Ok(KvaserChannelBuilder {
+    pub fn channel(&self, index: u32) -> KvaserChannelBuilder<Initial> {
+        KvaserChannelBuilder {
             lib: Arc::clone(&self.lib),
             channel_index: index as i32,
             state: Initial,
             _mode: PhantomData,
-        })
+        }
     }
 }
 
@@ -257,9 +262,7 @@ impl KvaserChannelBuilder<Initial> {
     /// builder.
     pub fn classic(self, bitrate_hz: u32) -> Result<KvaserChannelBuilder<Classic>, KvaserError> {
         if bitrate_hz == 0 || KVASER_CLOCK_HZ % bitrate_hz != 0 {
-            return Err(KvaserError::NotSupported(format!(
-                "classic bitrate {bitrate_hz} Hz does not divide {KVASER_CLOCK_HZ} Hz"
-            )));
+            return Err(KvaserError::UnsupportedBitrate(bitrate_hz));
         }
         Ok(KvaserChannelBuilder {
             lib: self.lib,
@@ -280,14 +283,10 @@ impl KvaserChannelBuilder<Initial> {
         data_hz: u32,
     ) -> Result<KvaserChannelBuilder<Fd>, KvaserError> {
         if nominal_hz == 0 || KVASER_CLOCK_HZ % nominal_hz != 0 {
-            return Err(KvaserError::NotSupported(format!(
-                "nominal bitrate {nominal_hz} Hz does not divide {KVASER_CLOCK_HZ} Hz"
-            )));
+            return Err(KvaserError::UnsupportedBitrate(nominal_hz));
         }
         if data_hz == 0 || KVASER_CLOCK_HZ % data_hz != 0 {
-            return Err(KvaserError::NotSupported(format!(
-                "data bitrate {data_hz} Hz does not divide {KVASER_CLOCK_HZ} Hz"
-            )));
+            return Err(KvaserError::UnsupportedBitrate(data_hz));
         }
         Ok(KvaserChannelBuilder {
             lib: self.lib,
@@ -317,9 +316,7 @@ impl KvaserChannelBuilder<Initial> {
         params: BusParams,
     ) -> Result<KvaserChannelBuilder<ClassicExplicit>, KvaserError> {
         if bitrate_hz == 0 || KVASER_CLOCK_HZ % bitrate_hz != 0 {
-            return Err(KvaserError::NotSupported(format!(
-                "classic bitrate {bitrate_hz} Hz does not divide {KVASER_CLOCK_HZ} Hz"
-            )));
+            return Err(KvaserError::UnsupportedBitrate(bitrate_hz));
         }
         Ok(KvaserChannelBuilder {
             lib: self.lib,
@@ -344,14 +341,10 @@ impl KvaserChannelBuilder<Initial> {
         fd_params: BusParamsFd,
     ) -> Result<KvaserChannelBuilder<FdExplicit>, KvaserError> {
         if nominal_hz == 0 || KVASER_CLOCK_HZ % nominal_hz != 0 {
-            return Err(KvaserError::NotSupported(format!(
-                "nominal bitrate {nominal_hz} Hz does not divide {KVASER_CLOCK_HZ} Hz"
-            )));
+            return Err(KvaserError::UnsupportedBitrate(nominal_hz));
         }
         if data_hz == 0 || KVASER_CLOCK_HZ % data_hz != 0 {
-            return Err(KvaserError::NotSupported(format!(
-                "data bitrate {data_hz} Hz does not divide {KVASER_CLOCK_HZ} Hz"
-            )));
+            return Err(KvaserError::UnsupportedBitrate(data_hz));
         }
         Ok(KvaserChannelBuilder {
             lib: self.lib,
@@ -474,7 +467,7 @@ fn open_classic(
         // SAFETY: canBusOn was loaded from canlib; handle is valid
         check_status(unsafe { (lib.bus_on)(handle) })?;
         let event = ReceiveEvent::new(lib, handle)?;
-        KvaserChannel::<Classic>::new(lib.clone(), handle, event)
+        Ok(KvaserChannel::<Classic>::new(lib.clone(), handle, event))
     })();
 
     if result.is_err() {
@@ -550,7 +543,7 @@ fn open_fd(
         // SAFETY: canBusOn was loaded from canlib; handle is valid
         check_status(unsafe { (lib.bus_on)(handle) })?;
         let event = ReceiveEvent::new(lib, handle)?;
-        KvaserChannel::<Fd>::new(lib.clone(), handle, event)
+        Ok(KvaserChannel::<Fd>::new(lib.clone(), handle, event))
     })();
 
     if result.is_err() {
@@ -599,7 +592,7 @@ fn to_data_tq(bitrate_hz: u32, p: &BusParamsFd) -> Result<KvBusParamsTq, KvaserE
 fn compute_prescaler(bitrate_hz: u32, tq: u32) -> Result<i32, KvaserError> {
     let bit_time = u64::from(bitrate_hz) * u64::from(tq);
     if bit_time == 0 || u64::from(KVASER_CLOCK_HZ) % bit_time != 0 {
-        return Err(KvaserError::NotSupported(format!(
+        return Err(KvaserError::UnsupportedTiming(format!(
             "cannot achieve {bitrate_hz} Hz with {tq} TQ at {KVASER_CLOCK_HZ} Hz clock \
              (prescaler would be non-integer)"
         )));

@@ -13,15 +13,15 @@
 //! use can_hal_socketcan::SocketCanDriver;
 //!
 //! let driver = SocketCanDriver::new();
-//! let channel = driver.channel_by_name("vcan0").connect()?;
+//! let channel = driver.channel_by_name("vcan0").connect().unwrap();
 //!
 //! let config = IsoTpConfig::new(
-//!     CanId::new_standard(0x7E0)?,
-//!     CanId::new_standard(0x7E8)?,
+//!     CanId::new_standard(0x7E0).unwrap(),
+//!     CanId::new_standard(0x7E8).unwrap(),
 //! );
 //! let mut isotp = IsoTpChannel::new(channel, config);
-//! isotp.send(&[0x10, 0x01])?;
-//! let response = isotp.receive()?;
+//! isotp.send(&[0x10, 0x01]).unwrap();
+//! let response = isotp.receive().unwrap();
 //! ```
 //!
 //! # Addressing modes

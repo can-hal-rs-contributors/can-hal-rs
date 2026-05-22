@@ -55,6 +55,7 @@ impl fmt::Display for PcanStatus {
 
 /// Errors from the PCAN-Basic backend.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PcanError {
     /// The PCAN-Basic library could not be loaded at runtime.
     LibraryLoad(libloading::Error),

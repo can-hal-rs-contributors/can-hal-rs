@@ -55,7 +55,6 @@ fn main() {
             let driver = can_hal_kvaser::KvaserDriver::new().expect("CANlib not found");
             let channel = driver
                 .channel(0)
-                .unwrap()
                 .fd(500_000, 4_000_000)
                 .unwrap()
                 .connect()
@@ -133,7 +132,6 @@ fn main() {
         let driver = can_hal_kvaser::KvaserDriver::new().expect("CANlib not found");
         let channel = driver
             .channel(0)
-            .unwrap()
             .fd(500_000, 4_000_000)
             .unwrap()
             .connect()

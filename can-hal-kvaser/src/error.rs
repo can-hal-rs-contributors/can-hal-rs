@@ -35,6 +35,7 @@ impl fmt::Display for KvaserStatus {
 
 /// Errors returned by the KVASER CANlib backend.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum KvaserError {
     /// The CANlib shared library could not be loaded.
     LibraryLoad(libloading::Error),
@@ -42,10 +43,12 @@ pub enum KvaserError {
     Canlib(KvaserStatus),
     /// A frame could not be constructed from the received data.
     InvalidFrame(String),
-    /// The requested bitrate is not supported by CANlib predefined constants.
+    /// A bitrate (in Hz) does not evenly divide the 80 MHz CANlib clock,
+    /// so no exact prescaler exists.
     UnsupportedBitrate(u32),
-    /// An operation is not supported in the current channel configuration.
-    NotSupported(String),
+    /// No timing parameters satisfy the requested bitrate + sample point
+    /// at the 80 MHz CANlib clock within the segment-length constraints.
+    UnsupportedTiming(String),
     /// A platform-specific error occurred.
     Platform(String),
 }
@@ -57,12 +60,9 @@ impl fmt::Display for KvaserError {
             Self::Canlib(s) => write!(f, "CANlib error: {s}"),
             Self::InvalidFrame(msg) => write!(f, "invalid frame: {msg}"),
             Self::UnsupportedBitrate(hz) => {
-                write!(
-                    f,
-                    "unsupported bitrate {hz} bps; use a standard CANlib bitrate"
-                )
+                write!(f, "unsupported bitrate {hz} bps")
             }
-            Self::NotSupported(msg) => write!(f, "not supported: {msg}"),
+            Self::UnsupportedTiming(msg) => write!(f, "unsupported timing: {msg}"),
             Self::Platform(msg) => write!(f, "platform error: {msg}"),
         }
     }

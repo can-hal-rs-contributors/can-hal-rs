@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Opening KVASER channel {channel_index}...");
 
     let driver = KvaserDriver::new()?;
-    let mut channel = driver.channel(channel_index)?.classic(500_000)?.connect()?;
+    let mut channel = driver.channel(channel_index).classic(500_000)?.connect()?;
 
     println!("Channel opened at 500 kbit/s. Sending frames...");
     println!("Press Ctrl+C to stop.\n");

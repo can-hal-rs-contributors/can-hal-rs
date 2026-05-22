@@ -16,7 +16,6 @@
 //! let driver = KvaserDriver::new().expect("CANlib not found");
 //! let mut channel = driver
 //!     .channel(0)
-//!     .unwrap()
 //!     .classic(500_000)
 //!     .unwrap()
 //!     .connect()
@@ -36,11 +35,14 @@
 //! let driver = KvaserDriver::new().unwrap();
 //! let mut channel = driver
 //!     .channel(0)
-//!     .unwrap()
 //!     .fd(500_000, 4_000_000)
 //!     .unwrap()
 //!     .connect()
 //!     .unwrap();
+//!
+//! let id = CanId::new_extended(0x18DA00F1).unwrap();
+//! let frame = CanFdFrame::new(id, &[0x10, 0x03], true, false).unwrap();
+//! channel.transmit_fd(&frame).unwrap();
 //! ```
 
 pub mod channel;

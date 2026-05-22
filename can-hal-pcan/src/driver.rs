@@ -52,6 +52,7 @@ const DATA_MAX_TSEG2: u32 = 16;
 
 /// Bus type for selecting a PCAN hardware family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PcanBusType {
     Usb,
     Pci,
@@ -306,7 +307,9 @@ fn solve_phase_timing(
         let tq_distance = (i64::from(total_tq) - i64::from(preferred_tq)).unsigned_abs() as u32;
         let score = sp_error + (tq_distance as f32) * 0.001;
 
-        let sjw = tseg2.min(DEFAULT_SJW_CAP);
+        // ISO 11898-1 requires SJW <= min(tseg1, tseg2). Cap by tseg1 too so
+        // the solver never emits a value the hardware will reject.
+        let sjw = tseg1.min(tseg2).min(DEFAULT_SJW_CAP);
         let timing = PcanPhaseTiming {
             brp,
             tseg1,
@@ -425,7 +428,7 @@ impl PcanChannelBuilder<Classic> {
         let status =
             unsafe { (self.lib.initialize)(self.handle, self.state.bitrate_const(), 0, 0, 0) };
         check_status(status)?;
-        PcanChannel::new(self.lib, self.handle)
+        finalize_channel(self.lib, self.handle)
     }
 }
 
@@ -477,7 +480,7 @@ impl PcanChannelBuilder<Fd> {
         let timing = PcanFdTiming { nominal, data };
 
         initialize_fd_with_timing(&self.lib, self.handle, timing)?;
-        PcanChannel::new(self.lib, self.handle)
+        finalize_channel(self.lib, self.handle)
     }
 }
 
@@ -486,7 +489,27 @@ impl PcanChannelBuilder<FdExplicit> {
     /// previously supplied explicit timing.
     pub fn connect(self) -> Result<PcanChannel<Fd>, PcanError> {
         initialize_fd_with_timing(&self.lib, self.handle, self.state.timing())?;
-        PcanChannel::new(self.lib, self.handle)
+        finalize_channel(self.lib, self.handle)
+    }
+}
+
+/// Construct the receive event for an already-initialized PCAN channel and
+/// wrap it in [`PcanChannel`]. If event construction fails, uninitialize the
+/// channel to avoid leaking the hardware handle.
+fn finalize_channel<Mode>(
+    lib: Arc<PcanLibrary>,
+    handle: u16,
+) -> Result<PcanChannel<Mode>, PcanError> {
+    match crate::event::ReceiveEvent::new(lib.clone(), handle) {
+        Ok(event) => Ok(PcanChannel::new(lib, handle, event)),
+        Err(err) => {
+            // SAFETY: handle was just successfully initialized via
+            // CAN_Initialize{,FD}. Clean up to avoid leaking the channel.
+            unsafe {
+                let _ = (lib.uninitialize)(handle);
+            }
+            Err(err)
+        }
     }
 }
 

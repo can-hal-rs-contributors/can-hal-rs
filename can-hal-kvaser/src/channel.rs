@@ -42,17 +42,13 @@ pub struct KvaserChannel<Mode> {
 }
 
 impl<Mode> KvaserChannel<Mode> {
-    pub(crate) const fn new(
-        lib: Arc<KvaserLibrary>,
-        handle: i32,
-        event: ReceiveEvent,
-    ) -> Result<Self, KvaserError> {
-        Ok(Self {
+    pub(crate) const fn new(lib: Arc<KvaserLibrary>, handle: i32, event: ReceiveEvent) -> Self {
+        Self {
             lib,
             handle,
             event,
             _mode: PhantomData,
-        })
+        }
     }
 
     /// Non-blocking read. Returns `Ok(None)` if the queue is empty.
