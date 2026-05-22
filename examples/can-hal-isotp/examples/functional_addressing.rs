@@ -64,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "Listener: received frame on 0x7DF, data: {:02X?}",
                 frame.data()
             );
-            // Expected data: [03 02 10 01] (SF_DL=3, then the 3 UDS bytes)
+            // Expected data: [02 10 01] (SF_DL=2, then the 2 UDS bytes)
             println!(
                 "  SF_DL = {}, payload = {:02X?}",
                 frame.data()[0],

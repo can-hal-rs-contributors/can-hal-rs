@@ -10,8 +10,8 @@
 //     Install from: https://www.kvaser.com/downloads-kvaser/
 //
 // Usage:
-//   cargo run --example receive
-//   cargo run --example receive -- <channel_index>
+//   cargo run --example kvaser_receive
+//   cargo run --example kvaser_receive -- <channel_index>
 //
 //   channel_index: 0-based channel index (default: 0)
 

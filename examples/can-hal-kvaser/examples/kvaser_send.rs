@@ -10,8 +10,8 @@
 //     Install from: https://www.kvaser.com/downloads-kvaser/
 //
 // Usage:
-//   cargo run --example send
-//   cargo run --example send -- <channel_index>
+//   cargo run --example kvaser_send
+//   cargo run --example kvaser_send -- <channel_index>
 //
 //   channel_index: 0-based channel index (default: 0)
 

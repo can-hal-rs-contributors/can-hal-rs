@@ -10,8 +10,8 @@
 //     Install from: https://www.peak-system.com/PCAN-Basic.239.0.html
 //
 // Usage:
-//   cargo run --example receive
-//   cargo run --example receive -- <channel_index>
+//   cargo run --example pcan_receive
+//   cargo run --example pcan_receive -- <channel_index>
 //
 //   channel_index: 0-based USB channel index (default: 0 = PCAN_USBBUS1)
 
