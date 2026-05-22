@@ -250,7 +250,9 @@ impl<Mode> Filterable for PcanChannel<Mode> {
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), Self::Error> {
         // Reset both frame types to accept-all first, so any prior filter
         // is replaced even when `filters` covers only one frame type (or is
-        // empty).
+        // empty). On partial failure (e.g. the extended apply fails after
+        // the standard apply succeeded), revert to accept-all rather than
+        // leaving a half-merged state.
         self.clear_filters()?;
 
         if filters.is_empty() {
@@ -273,23 +275,31 @@ impl<Mode> Filterable for PcanChannel<Mode> {
             }
         }
 
-        if let (Some(from), Some(to)) = (std_min, std_max) {
-            // SAFETY: filter_messages() was loaded from PCANBasic and self.handle is valid.
-            let status = unsafe {
-                (self.lib.filter_messages)(self.handle, from, to, ffi::PCAN_MODE_STANDARD)
-            };
-            check_status(status)?;
-        }
+        let apply = (|| {
+            if let (Some(from), Some(to)) = (std_min, std_max) {
+                // SAFETY: filter_messages() was loaded from PCANBasic and self.handle is valid.
+                let status = unsafe {
+                    (self.lib.filter_messages)(self.handle, from, to, ffi::PCAN_MODE_STANDARD)
+                };
+                check_status(status)?;
+            }
+            if let (Some(from), Some(to)) = (ext_min, ext_max) {
+                // SAFETY: filter_messages() was loaded from PCANBasic and self.handle is valid.
+                let status = unsafe {
+                    (self.lib.filter_messages)(self.handle, from, to, ffi::PCAN_MODE_EXTENDED)
+                };
+                check_status(status)?;
+            }
+            Ok(())
+        })();
 
-        if let (Some(from), Some(to)) = (ext_min, ext_max) {
-            // SAFETY: filter_messages() was loaded from PCANBasic and self.handle is valid.
-            let status = unsafe {
-                (self.lib.filter_messages)(self.handle, from, to, ffi::PCAN_MODE_EXTENDED)
-            };
-            check_status(status)?;
+        if apply.is_err() {
+            // Best-effort: leave filters in accept-all rather than a
+            // half-merged state. Ignore secondary cleanup failure.
+            #[allow(clippy::let_underscore_must_use)]
+            let _ = self.clear_filters();
         }
-
-        Ok(())
+        apply
     }
 
     fn clear_filters(&mut self) -> Result<(), Self::Error> {

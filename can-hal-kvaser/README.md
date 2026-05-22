@@ -61,7 +61,7 @@ channel.transmit_fd(&frame).unwrap();
 
 ## Sample points
 
-`.classic(...)` and `.fd(...)` default to a 70% nominal and 80% data-phase sample point. Override per phase with `SamplePoint`:
+`.classic(...)` defaults to a 70% nominal sample point; `.fd(...)` adds an 80% data-phase default. Override per phase with `SamplePoint`:
 
 ```rust,no_run
 use can_hal::SamplePoint;

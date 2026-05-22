@@ -259,28 +259,39 @@ impl<Mode> Filterable for KvaserChannel<Mode> {
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), KvaserError> {
         // Reset both frame types to accept-all first, so any prior filter is
         // replaced even when `filters` covers only one frame type (or is
-        // empty).
+        // empty). On partial failure (e.g. the extended apply fails after
+        // the standard apply succeeded), revert to accept-all rather than
+        // leaving a half-merged state.
         self.clear_filters()?;
         if filters.is_empty() {
             return Ok(());
         }
-        apply_merged_filter(
-            &self.lib,
-            self.handle,
-            filters,
-            |f| f.id.is_standard(),
-            CAN_FILTER_SET_CODE_STD,
-            CAN_FILTER_SET_MASK_STD,
-        )?;
-        apply_merged_filter(
-            &self.lib,
-            self.handle,
-            filters,
-            |f| f.id.is_extended(),
-            CAN_FILTER_SET_CODE_EXT,
-            CAN_FILTER_SET_MASK_EXT,
-        )?;
-        Ok(())
+        let apply = (|| {
+            apply_merged_filter(
+                &self.lib,
+                self.handle,
+                filters,
+                |f| f.id.is_standard(),
+                CAN_FILTER_SET_CODE_STD,
+                CAN_FILTER_SET_MASK_STD,
+            )?;
+            apply_merged_filter(
+                &self.lib,
+                self.handle,
+                filters,
+                |f| f.id.is_extended(),
+                CAN_FILTER_SET_CODE_EXT,
+                CAN_FILTER_SET_MASK_EXT,
+            )?;
+            Ok(())
+        })();
+        if apply.is_err() {
+            // Best-effort: leave filters in accept-all rather than a
+            // half-merged state. Ignore secondary cleanup failure.
+            #[allow(clippy::let_underscore_must_use)]
+            let _ = self.clear_filters();
+        }
+        apply
     }
 
     fn clear_filters(&mut self) -> Result<(), KvaserError> {
@@ -297,8 +308,33 @@ impl<Mode> Filterable for KvaserChannel<Mode> {
     }
 }
 
-/// Merge all filters matching `predicate` into a single (code, mask) pair and
-/// apply it via `canAccept`. No heap allocation.
+/// Compute the merged `(code, mask)` for all filters matching `predicate`.
+/// Returns `None` if no filter matches.
+///
+/// CANlib only supports one hardware filter per frame type, so multiple
+/// user filters must be widened into a single `(code, mask)` that accepts
+/// every ID any input filter would. The merged filter may accept additional
+/// IDs but never fewer.
+fn merge_filters(filters: &[Filter], predicate: impl Fn(&Filter) -> bool) -> Option<(u32, u32)> {
+    let mut merged: Option<(u32, u32)> = None;
+    for f in filters.iter().filter(|f| predicate(f)) {
+        let f_code = f.id.raw() & f.mask;
+        merged = Some(match merged {
+            None => (f_code, f.mask),
+            // Widen to cover both (c, m) and (f_code, f.mask): keep only
+            // mask bits present in both filters AND where the codes agree
+            // (codes-differ bits become "don't care").
+            Some((c, m)) => {
+                let new_mask = (m & f.mask) & !(c ^ f_code);
+                let new_code = c & new_mask;
+                (new_code, new_mask)
+            }
+        });
+    }
+    merged
+}
+
+/// Merge filters matching `predicate` and apply via `canAccept`.
 #[allow(clippy::cast_possible_wrap, clippy::cast_lossless)] // c_long is i32 on Windows, i64 on Linux
 fn apply_merged_filter(
     lib: &KvaserLibrary,
@@ -308,23 +344,12 @@ fn apply_merged_filter(
     code_flag: u32,
     mask_flag: u32,
 ) -> Result<(), KvaserError> {
-    let mut merged: Option<(u32, u32)> = None;
-
-    for f in filters.iter().filter(|f| predicate(f)) {
-        let code = f.id.raw() & f.mask;
-        merged = Some(match merged {
-            None => (code, f.mask),
-            Some((c, m)) => (c & code, m | f.mask),
-        });
-    }
-
-    if let Some((code, mask)) = merged {
+    if let Some((code, mask)) = merge_filters(filters, predicate) {
         // SAFETY: canAccept was loaded from canlib; handle is valid
         check_status(unsafe { (lib.accept)(handle, code as c_long, code_flag) })?;
         // SAFETY: canAccept was loaded from canlib; handle is valid
         check_status(unsafe { (lib.accept)(handle, mask as c_long, mask_flag) })?;
     }
-
     Ok(())
 }
 
@@ -362,5 +387,62 @@ impl<Mode> BusStatus for KvaserChannel<Mode> {
             transmit: tx_err.min(255) as u8,
             receive: rx_err.min(255) as u8,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use can_hal::id::CanId;
+
+    fn accepts(code: u32, mask: u32, id: u32) -> bool {
+        id & mask == code
+    }
+
+    fn std_filter(id: u16, mask: u32) -> Filter {
+        Filter {
+            id: CanId::new_standard(id).unwrap(),
+            mask,
+        }
+    }
+
+    #[test]
+    fn merge_single_exact_filter_accepts_only_that_id() {
+        let merged = merge_filters(&[std_filter(0x100, 0x7FF)], |_| true).unwrap();
+        assert!(accepts(merged.0, merged.1, 0x100));
+        assert!(!accepts(merged.0, merged.1, 0x101));
+        assert!(!accepts(merged.0, merged.1, 0x200));
+    }
+
+    #[test]
+    fn merge_two_consecutive_ids_accepts_both() {
+        // Regression: prior implementation used `c & code` / `m | f.mask`
+        // and produced (0x100, 0x7FF) here, dropping 0x101.
+        let merged = merge_filters(
+            &[std_filter(0x100, 0x7FF), std_filter(0x101, 0x7FF)],
+            |_| true,
+        )
+        .unwrap();
+        assert!(accepts(merged.0, merged.1, 0x100));
+        assert!(accepts(merged.0, merged.1, 0x101));
+    }
+
+    #[test]
+    fn merge_with_no_matches_returns_none() {
+        let merged = merge_filters(&[std_filter(0x100, 0x7FF)], |_| false);
+        assert!(merged.is_none());
+    }
+
+    #[test]
+    fn merge_widening_overaccepts_but_never_underaccepts() {
+        // Two filters with one bit of difference share all other bits.
+        let merged = merge_filters(
+            &[std_filter(0x100, 0x7FF), std_filter(0x200, 0x7FF)],
+            |_| true,
+        )
+        .unwrap();
+        // Both originals must still be accepted.
+        assert!(accepts(merged.0, merged.1, 0x100));
+        assert!(accepts(merged.0, merged.1, 0x200));
     }
 }

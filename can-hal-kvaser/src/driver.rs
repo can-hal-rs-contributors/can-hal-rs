@@ -318,9 +318,18 @@ impl KvaserChannelBuilder<Initial> {
         if bitrate_hz == 0 || KVASER_CLOCK_HZ % bitrate_hz != 0 {
             return Err(KvaserError::UnsupportedBitrate(bitrate_hz));
         }
-        // Eagerly validate the (bitrate, segments) combination satisfies
-        // compute_prescaler so any failure surfaces at the call site rather
-        // than at connect().
+        // Eagerly validate that segment values are within the
+        // controller's accepted range and that the (bitrate, segments)
+        // combination yields an integer prescaler. Without these checks,
+        // out-of-range params would otherwise fail at `connect()` with a
+        // raw CANlib status code.
+        check_segment_bounds(
+            params.tseg1,
+            params.tseg2,
+            NOMINAL_MAX_TSEG1,
+            NOMINAL_MAX_TSEG2,
+            "nominal",
+        )?;
         let tq = total_tq(params.tseg1, params.tseg2)?;
         let _ = compute_prescaler(bitrate_hz, tq)?;
         Ok(KvaserChannelBuilder {
@@ -351,9 +360,22 @@ impl KvaserChannelBuilder<Initial> {
         if data_hz == 0 || KVASER_CLOCK_HZ % data_hz != 0 {
             return Err(KvaserError::UnsupportedBitrate(data_hz));
         }
-        // Eagerly validate the (bitrate, segments) combinations satisfy
-        // compute_prescaler so any failure surfaces at the call site rather
-        // than at connect().
+        // Eagerly validate segment-length bounds and that the (bitrate,
+        // segments) combinations yield integer prescalers within range.
+        check_segment_bounds(
+            params.tseg1,
+            params.tseg2,
+            NOMINAL_MAX_TSEG1,
+            NOMINAL_MAX_TSEG2,
+            "nominal",
+        )?;
+        check_segment_bounds(
+            fd_params.tseg1,
+            fd_params.tseg2,
+            DATA_MAX_TSEG1,
+            DATA_MAX_TSEG2,
+            "data",
+        )?;
         let nominal_tq = total_tq(params.tseg1, params.tseg2)?;
         let _ = compute_prescaler(nominal_hz, nominal_tq)?;
         let data_tq_val = total_tq(fd_params.tseg1, fd_params.tseg2)?;
@@ -612,6 +634,27 @@ fn total_tq(tseg1: u32, tseg2: u32) -> Result<u32, KvaserError> {
         })
 }
 
+/// Verify segment values fit the controller's range for the given phase.
+fn check_segment_bounds(
+    tseg1: u32,
+    tseg2: u32,
+    max_tseg1: u32,
+    max_tseg2: u32,
+    phase: &'static str,
+) -> Result<(), KvaserError> {
+    if tseg1 == 0 || tseg1 > max_tseg1 {
+        return Err(KvaserError::UnsupportedTiming(format!(
+            "{phase} tseg1={tseg1} out of range [1, {max_tseg1}]"
+        )));
+    }
+    if tseg2 == 0 || tseg2 > max_tseg2 {
+        return Err(KvaserError::UnsupportedTiming(format!(
+            "{phase} tseg2={tseg2} out of range [1, {max_tseg2}]"
+        )));
+    }
+    Ok(())
+}
+
 #[allow(clippy::cast_possible_wrap)] // checked above
 fn u32_to_i32(value: u32, field: &'static str) -> Result<i32, KvaserError> {
     if value > i32::MAX as u32 {
@@ -633,12 +676,13 @@ fn compute_prescaler(bitrate_hz: u32, tq: u32) -> Result<i32, KvaserError> {
         )));
     }
     let prescaler = u64::from(KVASER_CLOCK_HZ) / bit_time;
-    if prescaler > i32::MAX as u64 {
+    if prescaler == 0 || prescaler > u64::from(MAX_PRESCALER) {
         return Err(KvaserError::UnsupportedTiming(format!(
-            "prescaler {prescaler} for bitrate={bitrate_hz} Hz, tq={tq} does not fit in i32"
+            "prescaler {prescaler} for bitrate={bitrate_hz} Hz, tq={tq} \
+             out of range [1, {MAX_PRESCALER}]"
         )));
     }
-    #[allow(clippy::cast_possible_truncation)] // bounded above
+    #[allow(clippy::cast_possible_truncation)] // bounded above by MAX_PRESCALER
     Ok(prescaler as i32)
 }
 
