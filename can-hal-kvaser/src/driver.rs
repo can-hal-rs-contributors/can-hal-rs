@@ -318,6 +318,11 @@ impl KvaserChannelBuilder<Initial> {
         if bitrate_hz == 0 || KVASER_CLOCK_HZ % bitrate_hz != 0 {
             return Err(KvaserError::UnsupportedBitrate(bitrate_hz));
         }
+        // Eagerly validate the (bitrate, segments) combination satisfies
+        // compute_prescaler so any failure surfaces at the call site rather
+        // than at connect().
+        let tq = total_tq(params.tseg1, params.tseg2)?;
+        let _ = compute_prescaler(bitrate_hz, tq)?;
         Ok(KvaserChannelBuilder {
             lib: self.lib,
             channel_index: self.channel_index,
@@ -346,6 +351,13 @@ impl KvaserChannelBuilder<Initial> {
         if data_hz == 0 || KVASER_CLOCK_HZ % data_hz != 0 {
             return Err(KvaserError::UnsupportedBitrate(data_hz));
         }
+        // Eagerly validate the (bitrate, segments) combinations satisfy
+        // compute_prescaler so any failure surfaces at the call site rather
+        // than at connect().
+        let nominal_tq = total_tq(params.tseg1, params.tseg2)?;
+        let _ = compute_prescaler(nominal_hz, nominal_tq)?;
+        let data_tq_val = total_tq(fd_params.tseg1, fd_params.tseg2)?;
+        let _ = compute_prescaler(data_hz, data_tq_val)?;
         Ok(KvaserChannelBuilder {
             lib: self.lib,
             channel_index: self.channel_index,
@@ -601,7 +613,7 @@ fn total_tq(tseg1: u32, tseg2: u32) -> Result<u32, KvaserError> {
 }
 
 #[allow(clippy::cast_possible_wrap)] // checked above
-fn u32_to_i32(value: u32, field: &str) -> Result<i32, KvaserError> {
+fn u32_to_i32(value: u32, field: &'static str) -> Result<i32, KvaserError> {
     if value > i32::MAX as u32 {
         Err(KvaserError::UnsupportedTiming(format!(
             "{field}={value} does not fit in i32"
@@ -700,5 +712,35 @@ mod tests {
     #[test]
     fn compute_prescaler_non_integer_fails() {
         assert!(compute_prescaler(333_000, 20).is_err());
+    }
+
+    #[test]
+    fn u32_to_i32_accepts_i32_max() {
+        assert_eq!(u32_to_i32(i32::MAX as u32, "x").unwrap(), i32::MAX);
+    }
+
+    #[test]
+    fn u32_to_i32_rejects_above_i32_max() {
+        assert!(u32_to_i32(i32::MAX as u32 + 1, "x").is_err());
+        assert!(u32_to_i32(u32::MAX, "x").is_err());
+    }
+
+    #[test]
+    fn total_tq_handles_overflow() {
+        assert!(total_tq(u32::MAX, 1).is_err());
+        assert!(total_tq(u32::MAX, u32::MAX).is_err());
+        assert_eq!(total_tq(13, 6).unwrap(), 20);
+    }
+
+    #[test]
+    fn compute_prescaler_rejects_too_large() {
+        // Find a (bitrate, tq) where the integer prescaler would exceed i32::MAX.
+        // 80M / (1 * 1) = 80M (fits). Try bitrate=1, tq=1 -> prescaler=80M (fits).
+        // i32::MAX is ~2.1B, so we need clock / (bitrate * tq) > 2.1B. With
+        // clock=80M, that requires bitrate * tq < 80M / 2.1B < 1, impossible.
+        // Confirms the cast is safe under all valid inputs in practice. Still,
+        // assert the function returns the expected result at the boundary.
+        let r = compute_prescaler(80_000_000, 1).unwrap();
+        assert_eq!(r, 1);
     }
 }

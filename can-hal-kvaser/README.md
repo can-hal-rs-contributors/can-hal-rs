@@ -80,7 +80,7 @@ let mut channel = driver
 
 ## Raw timing
 
-For full control over `(tseg1, tseg2, sjw)` and the `noSamp` / `syncMode` flags, transition from `<Initial>` to `<ClassicExplicit>` / `<FdExplicit>` instead:
+For full control over `(tseg1, tseg2, sjw)` and the `noSamp` / `syncMode` flags, transition from `<Initial>` to `<ClassicExplicit>` / `<FdExplicit>` instead. The bitrate must still evenly divide the 80 MHz CANlib clock, and `(bitrate * (1 + tseg1 + tseg2))` must divide the clock too — both are checked at the call site:
 
 ```rust,no_run
 use can_hal_kvaser::{BusParams, BusParamsFd, KvaserDriver};
@@ -88,7 +88,7 @@ use can_hal_kvaser::{BusParams, BusParamsFd, KvaserDriver};
 let driver = KvaserDriver::new().unwrap();
 let nominal = BusParams { tseg1: 13, tseg2: 6, sjw: 4, no_samp: 1, sync_mode: 0 };
 let data = BusParamsFd { tseg1: 7, tseg2: 2, sjw: 2 };
-let mut channel = driver
+let _channel = driver
     .channel(0)
     .fd_explicit(500_000, 4_000_000, nominal, data)
     .unwrap()

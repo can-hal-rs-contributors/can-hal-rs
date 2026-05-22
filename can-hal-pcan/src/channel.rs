@@ -248,8 +248,13 @@ impl<Mode> Filterable for PcanChannel<Mode> {
     /// This may accept additional IDs beyond the intended set when masks have
     /// non-contiguous zero bits.
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), Self::Error> {
+        // Reset both frame types to accept-all first, so any prior filter
+        // is replaced even when `filters` covers only one frame type (or is
+        // empty).
+        self.clear_filters()?;
+
         if filters.is_empty() {
-            return self.clear_filters();
+            return Ok(());
         }
 
         let mut std_min: Option<u32> = None;

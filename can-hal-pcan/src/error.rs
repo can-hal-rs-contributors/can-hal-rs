@@ -82,7 +82,7 @@ impl fmt::Display for PcanError {
             Self::Pcan(status) => write!(f, "{status}"),
             Self::InvalidFrame(msg) => write!(f, "invalid frame: {msg}"),
             Self::InvalidChannel(idx) => write!(f, "invalid PCAN channel index: {idx}"),
-            Self::UnsupportedBitrate(br) => write!(f, "unsupported bitrate: {br} bps"),
+            Self::UnsupportedBitrate(br) => write!(f, "unsupported bitrate {br} bps"),
             Self::UnsupportedTiming(msg) => write!(f, "unsupported FD timing: {msg}"),
             Self::Platform(msg) => write!(f, "platform error: {msg}"),
         }

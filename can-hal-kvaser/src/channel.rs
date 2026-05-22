@@ -257,10 +257,12 @@ impl<Mode> Filterable for KvaserChannel<Mode> {
     type Error = KvaserError;
 
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), KvaserError> {
-        // An empty filter set means "no constraint, accept everything",
-        // matching the PCAN backend's behavior.
+        // Reset both frame types to accept-all first, so any prior filter is
+        // replaced even when `filters` covers only one frame type (or is
+        // empty).
+        self.clear_filters()?;
         if filters.is_empty() {
-            return self.clear_filters();
+            return Ok(());
         }
         apply_merged_filter(
             &self.lib,

@@ -61,7 +61,23 @@ let mut channel = driver
     .unwrap();
 ```
 
-For raw control over per-segment timing, transition straight from `<Initial>` to `<FdExplicit>` via `.fd_explicit(PcanFdTiming)` (e.g., for unusually large SJW values).
+For raw control over per-segment timing, transition straight from `<Initial>` to `<FdExplicit>` via `.fd_explicit(PcanFdTiming)` (e.g., for unusually large SJW values):
+
+```rust,no_run
+use can_hal_pcan::{PcanDriver, PcanFdTiming, PcanPhaseTiming};
+
+let driver = PcanDriver::new().unwrap();
+let timing = PcanFdTiming {
+    nominal: PcanPhaseTiming { brp: 8, tseg1: 13, tseg2: 6, sjw: 6 },
+    data:    PcanPhaseTiming { brp: 2, tseg1: 7,  tseg2: 2, sjw: 2 },
+};
+let _channel = driver
+    .channel(0)
+    .unwrap()
+    .fd_explicit(timing)
+    .connect()
+    .unwrap();
+```
 
 ## Prerequisites
 
