@@ -314,18 +314,25 @@ impl<Mode> Filterable for KvaserChannel<Mode> {
 /// CANlib only supports one hardware filter per frame type, so multiple
 /// user filters must be widened into a single `(code, mask)` that accepts
 /// every ID any input filter would. The merged filter may accept additional
-/// IDs but never fewer.
+/// IDs but never fewer. The mask is re-clamped to the ID width to defend
+/// against struct-literal `Filter` construction that bypasses `Filter::new`.
 fn merge_filters(filters: &[Filter], predicate: impl Fn(&Filter) -> bool) -> Option<(u32, u32)> {
     let mut merged: Option<(u32, u32)> = None;
     for f in filters.iter().filter(|f| predicate(f)) {
-        let f_code = f.id.raw() & f.mask;
+        let max_id = if f.id.is_extended() {
+            0x1FFF_FFFF
+        } else {
+            0x7FF
+        };
+        let f_mask = f.mask & max_id;
+        let f_code = f.id.raw() & f_mask;
         merged = Some(match merged {
-            None => (f_code, f.mask),
-            // Widen to cover both (c, m) and (f_code, f.mask): keep only
+            None => (f_code, f_mask),
+            // Widen to cover both (c, m) and (f_code, f_mask): keep only
             // mask bits present in both filters AND where the codes agree
             // (codes-differ bits become "don't care").
             Some((c, m)) => {
-                let new_mask = (m & f.mask) & !(c ^ f_code);
+                let new_mask = (m & f_mask) & !(c ^ f_code);
                 let new_code = c & new_mask;
                 (new_code, new_mask)
             }

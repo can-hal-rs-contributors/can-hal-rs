@@ -77,10 +77,16 @@ pub fn from_socketcan_any_frame(frame: CanAnyFrame) -> Result<HalFrame, SocketCa
 }
 
 /// Convert a can-hal Filter to a socketcan CanFilter.
+///
+/// Re-clamps the mask to the ID width to defend against struct-literal
+/// `Filter` construction that bypasses `Filter::new`.
 pub fn to_socketcan_filter(filter: &HalFilter) -> CanFilter {
     let (raw_id, mask) = match filter.id {
-        CanId::Standard(v) => (u32::from(v), filter.mask),
-        CanId::Extended(v) => (v | CAN_EFF_FLAG, filter.mask | CAN_EFF_FLAG),
+        CanId::Standard(v) => (u32::from(v), filter.mask & 0x7FF),
+        CanId::Extended(v) => (
+            (v & 0x1FFF_FFFF) | CAN_EFF_FLAG,
+            (filter.mask & 0x1FFF_FFFF) | CAN_EFF_FLAG,
+        ),
     };
     CanFilter::new(raw_id, mask)
 }

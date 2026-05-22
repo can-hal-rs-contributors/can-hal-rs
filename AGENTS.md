@@ -132,20 +132,33 @@ cargo clippy -p can-hal-pcan -p can-hal-kvaser \
 
 ### Running Examples
 
-Each backend has an example crate under `examples/`:
+Each backend has an example crate under `examples/`, exposing one
+`[[example]]` per file. Run via `cargo run -p <crate> --example <name>`:
 
 ```bash
 # SocketCAN (requires vcan0 or physical interface)
-cargo run -p can-hal-socketcan-example
+cargo run -p can-hal-socketcan-examples --example socketcan_send
+cargo run -p can-hal-socketcan-examples --example socketcan_receive
+cargo run -p can-hal-socketcan-examples --example filter
 
 # PCAN (requires PCAN hardware + library)
-cargo run -p can-hal-pcan-example
+cargo run -p can-hal-pcan-examples --example pcan_send
+cargo run -p can-hal-pcan-examples --example pcan_receive
+cargo run -p can-hal-pcan-examples --example pcan_send_fd
+cargo run -p can-hal-pcan-examples --example pcan_receive_fd
+cargo run -p can-hal-pcan-examples --example bus_status
 
 # Kvaser (requires Kvaser hardware + library)
-cargo run -p can-hal-kvaser-example
+cargo run -p can-hal-kvaser-examples --example kvaser_send
+cargo run -p can-hal-kvaser-examples --example kvaser_receive
+cargo run -p can-hal-kvaser-examples --example kvaser_send_fd
+cargo run -p can-hal-kvaser-examples --example kvaser_receive_fd
 
 # ISO-TP
-cargo run -p can-hal-isotp-example
+cargo run -p can-hal-isotp-examples --example isotp_send
+cargo run -p can-hal-isotp-examples --example isotp_receive
+cargo run -p can-hal-isotp-examples --example loopback
+# see examples/can-hal-isotp/examples/ for the full list
 ```
 
 ### Virtual CAN Setup (for SocketCAN testing without hardware)
