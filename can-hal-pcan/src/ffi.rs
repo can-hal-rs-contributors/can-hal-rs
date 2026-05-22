@@ -106,12 +106,17 @@ pub const PCAN_MODE_EXTENDED: u8 = 0x02;
 
 pub const PCAN_RECEIVE_EVENT: u8 = 0x03;
 pub const PCAN_RECEIVE_STATUS: u8 = 0x04;
+pub const PCAN_MESSAGE_FILTER: u8 = 0x05;
 pub const PCAN_BUSOFF_AUTORESET: u8 = 0x07;
 pub const PCAN_LISTEN_ONLY: u8 = 0x08;
 pub const PCAN_CONTROLLER_NUMBER: u8 = 0x1A;
 pub const PCAN_CHANNEL_CONDITION: u8 = 0x09;
 pub const PCAN_BUSERROR_READ: u8 = 0x24;
 pub const PCAN_BUSERROR_WRITE: u8 = 0x25;
+
+// Values for PCAN_MESSAGE_FILTER.
+pub const PCAN_FILTER_CLOSE: u32 = 0;
+pub const PCAN_FILTER_OPEN: u32 = 1;
 
 // ---------------------------------------------------------------------------
 // Message structs

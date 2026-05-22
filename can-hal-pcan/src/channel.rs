@@ -247,16 +247,14 @@ impl<Mode> Filterable for PcanChannel<Mode> {
     ///
     /// This may accept additional IDs beyond the intended set when masks have
     /// non-contiguous zero bits.
+    ///
+    /// PCAN-Basic's `CAN_FilterMessages` only widens the active filter, so to
+    /// actually narrow we first switch the channel's `PCAN_MESSAGE_FILTER`
+    /// state to `CLOSE` (reject all), then call `CAN_FilterMessages` to open
+    /// the requested ranges.
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), Self::Error> {
-        // Reset both frame types to accept-all first, so any prior filter
-        // is replaced even when `filters` covers only one frame type (or is
-        // empty). On partial failure (e.g. the extended apply fails after
-        // the standard apply succeeded), revert to accept-all rather than
-        // leaving a half-merged state.
-        self.clear_filters()?;
-
         if filters.is_empty() {
-            return Ok(());
+            return self.clear_filters();
         }
 
         let mut std_min: Option<u32> = None;
@@ -274,6 +272,10 @@ impl<Mode> Filterable for PcanChannel<Mode> {
                 std_max = Some(std_max.map_or(to, |cur: u32| cur.max(to)));
             }
         }
+
+        // Close the filter (reject all), then open the requested ranges via
+        // CAN_FilterMessages.
+        self.set_filter_state(ffi::PCAN_FILTER_CLOSE)?;
 
         let apply = (|| {
             if let (Some(from), Some(to)) = (std_min, std_max) {
@@ -303,24 +305,29 @@ impl<Mode> Filterable for PcanChannel<Mode> {
     }
 
     fn clear_filters(&mut self) -> Result<(), Self::Error> {
-        // SAFETY: filter_messages() was loaded from PCANBasic and self.handle is valid.
-        let status = unsafe {
-            (self.lib.filter_messages)(self.handle, 0x000, 0x7FF, ffi::PCAN_MODE_STANDARD)
-        };
-        check_status(status)?;
+        // Switch PCAN_MESSAGE_FILTER to OPEN to accept all frames regardless
+        // of frame type. Using SetValue avoids the expand-only semantics of
+        // CAN_FilterMessages.
+        self.set_filter_state(ffi::PCAN_FILTER_OPEN)
+    }
+}
 
-        // SAFETY: filter_messages() was loaded from PCANBasic and self.handle is valid.
+impl<Mode> PcanChannel<Mode> {
+    /// Set the channel's `PCAN_MESSAGE_FILTER` parameter.
+    fn set_filter_state(&self, state: u32) -> Result<(), PcanError> {
+        let mut value = state;
+        #[allow(clippy::cast_possible_truncation)] // size_of::<u32>() == 4, fits in u32
+        // SAFETY: set_value() was loaded from PCANBasic and self.handle is valid.
+        // value is a stack-allocated u32 with the matching buffer length.
         let status = unsafe {
-            (self.lib.filter_messages)(
+            (self.lib.set_value)(
                 self.handle,
-                0x0000_0000,
-                0x1FFF_FFFF,
-                ffi::PCAN_MODE_EXTENDED,
+                ffi::PCAN_MESSAGE_FILTER,
+                std::ptr::from_mut(&mut value).cast::<std::ffi::c_void>(),
+                std::mem::size_of::<u32>() as u32,
             )
         };
-        check_status(status)?;
-
-        Ok(())
+        check_status(status)
     }
 }
 
