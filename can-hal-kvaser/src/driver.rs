@@ -323,7 +323,7 @@ impl KvaserChannelBuilder<Initial> {
     /// the call site rather than at `connect()`):
     ///
     /// - `bitrate_hz` evenly divides the 80 MHz CANlib clock,
-    /// - `tseg1` is in `[1, 256]` and `tseg2` is in `[1, 128]`,
+    /// - `tseg1` is in `[1, 256]` and `tseg2` is in `[2, 128]`,
     /// - `bitrate_hz * (1 + tseg1 + tseg2)` evenly divides the clock, and
     /// - the resulting prescaler is in `[1, 1024]`.
     pub fn classic_explicit(
@@ -360,8 +360,8 @@ impl KvaserChannelBuilder<Initial> {
     /// the call site rather than at `connect()`):
     ///
     /// - both `nominal_hz` and `data_hz` evenly divide the 80 MHz clock,
-    /// - nominal `tseg1` in `[1, 256]`, `tseg2` in `[1, 128]`,
-    /// - data `tseg1` in `[1, 32]`, `tseg2` in `[1, 16]`,
+    /// - nominal `tseg1` in `[1, 256]`, `tseg2` in `[2, 128]`,
+    /// - data `tseg1` in `[1, 32]`, `tseg2` in `[2, 16]`,
     /// - `bitrate * (1 + tseg1 + tseg2)` evenly divides the clock for each
     ///   phase, and
     /// - each resulting prescaler is in `[1, 1024]`.
@@ -652,9 +652,9 @@ fn check_segment_bounds(tseg1: u32, tseg2: u32, phase: TimingPhase) -> Result<()
             "{phase_name} tseg1={tseg1} out of range [1, {max_tseg1}]"
         )));
     }
-    if tseg2 == 0 || tseg2 > max_tseg2 {
+    if tseg2 < MIN_TSEG2 || tseg2 > max_tseg2 {
         return Err(KvaserError::UnsupportedTiming(format!(
-            "{phase_name} tseg2={tseg2} out of range [1, {max_tseg2}]"
+            "{phase_name} tseg2={tseg2} out of range [{MIN_TSEG2}, {max_tseg2}]"
         )));
     }
     Ok(())
@@ -802,6 +802,14 @@ mod tests {
     fn check_segment_bounds_rejects_zero() {
         assert!(check_segment_bounds(0, 6, TimingPhase::Nominal).is_err());
         assert!(check_segment_bounds(13, 0, TimingPhase::Nominal).is_err());
+    }
+
+    #[test]
+    fn check_segment_bounds_rejects_tseg2_below_min() {
+        // tseg2=1 is accepted by some drivers but rejected by Windows CANlib;
+        // the explicit path enforces the same MIN_TSEG2 floor as the solver.
+        assert!(check_segment_bounds(13, 1, TimingPhase::Nominal).is_err());
+        assert!(check_segment_bounds(7, 1, TimingPhase::Data).is_err());
     }
 
     #[test]

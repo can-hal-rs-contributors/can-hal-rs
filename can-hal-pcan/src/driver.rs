@@ -420,6 +420,11 @@ impl PcanChannelBuilder<Initial> {
     /// Use this when you need control beyond what the solver provides
     /// (e.g., unusually large SJW values or a non-standard bitrate that
     /// doesn't divide 80 MHz evenly).
+    ///
+    /// The values are not validated here. For cross-platform timing keep
+    /// `tseg2 >= 2` in both phases: some drivers (notably Windows) reject a
+    /// phase-segment-2 of 1 TQ that other platforms accept. The solver-driven
+    /// [`fd`](Self::fd) path already guarantees this.
     #[must_use]
     pub fn fd_explicit(self, timing: PcanFdTiming) -> PcanChannelBuilder<FdExplicit> {
         PcanChannelBuilder {
