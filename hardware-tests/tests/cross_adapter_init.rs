@@ -44,6 +44,7 @@ where
 #[test]
 fn test_direct_fd_frame_round_trip_brs_and_dlc() {
     let lengths = [0usize, 1, 8, 12, 20, 48, 64];
+    let count = lengths.len();
 
     let rx = thread::spawn(move || {
         let driver = can_hal_kvaser::KvaserDriver::new().unwrap();
@@ -54,7 +55,7 @@ fn test_direct_fd_frame_round_trip_brs_and_dlc() {
             .connect()
             .unwrap();
         let mut out = Vec::new();
-        for _ in 0..7 {
+        for _ in 0..count {
             let frame = ch
                 .receive_fd_timeout(Duration::from_secs(5))
                 .expect("Kvaser receive error")
