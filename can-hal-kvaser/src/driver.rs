@@ -46,6 +46,12 @@ const DATA_MAX_TSEG1: u32 = 32;
 const DATA_MAX_TSEG2: u32 = 16;
 const MAX_PRESCALER: u32 = 1024;
 
+/// Minimum phase-segment-2 the solver will emit. Windows CANlib rejects a
+/// tseg2 of 1 TQ with canERR_PARAM (Linux drivers accept it), so the solver
+/// keeps tseg2 >= 2 to stay portable. This never changes a default
+/// sample-point result - those already resolve to tseg2 >= 2.
+const MIN_TSEG2: u32 = 2;
+
 /// Nominal bus parameters: (tseg1, tseg2, sjw, noSamp, syncMode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BusParams {
@@ -127,7 +133,11 @@ fn solve_phase_timing(
         let tseg1 = tseg1_plus_one - 1;
         let tseg2 = i64::from(total_tq) - 1 - tseg1;
 
-        if tseg1 < 1 || tseg1 > i64::from(max_tseg1) || tseg2 < 1 || tseg2 > i64::from(max_tseg2) {
+        if tseg1 < 1
+            || tseg1 > i64::from(max_tseg1)
+            || tseg2 < i64::from(MIN_TSEG2)
+            || tseg2 > i64::from(max_tseg2)
+        {
             total_tq += 1;
             continue;
         }
@@ -710,6 +720,17 @@ mod tests {
             solve_phase_timing(5_000_000, SamplePoint::DATA_DEFAULT, TimingPhase::Data).unwrap();
         assert_eq!(tseg1, 12);
         assert_eq!(tseg2, 3);
+    }
+
+    #[test]
+    fn solver_data_4m_75pct_avoids_tseg2_of_one() {
+        // A 75% data sample point at 4 Mbit/s previously resolved to a 4 TQ
+        // timing with tseg2=1, which Windows CANlib rejects (canERR_PARAM).
+        // The MIN_TSEG2 floor forces a portable solution instead.
+        let (tseg1, tseg2, sjw) =
+            solve_phase_timing(4_000_000, SamplePoint::PCT_75, TimingPhase::Data).unwrap();
+        assert!(tseg2 >= MIN_TSEG2, "tseg2 must be >= 2, got {tseg2}");
+        assert_eq!((tseg1, tseg2, sjw), (14, 5, 4));
     }
 
     #[test]

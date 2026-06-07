@@ -63,13 +63,11 @@ fn test_kvaser_custom_sample_point_classic_interop() {
 
 #[test]
 fn test_custom_sample_point_fd_interop() {
-    // Customize the nominal sample point to 87.5% and confirm a non-default
-    // sample point still produces an interoperable FD link. The data phase is
-    // intentionally left at its default (80%): at 4 Mbit/s an aggressive data
-    // sample point such as 75% resolves to a 4 TQ timing with tseg2=1, which
-    // Windows CANlib rejects (canERR_PARAM) even though Linux accepts it. That
-    // is a solver portability gap, not something this interop test should
-    // assert.
+    // Both adapters set non-default sample points (nominal 87.5%, data 75%).
+    // The 75% data sample point at 4 Mbit/s is the case that exercises the
+    // solver's MIN_TSEG2 floor: without it the solver picks a 4 TQ / tseg2=1
+    // data timing that Windows CANlib rejects with canERR_PARAM. With the floor
+    // it resolves to a portable timing, so this verifies that fix on hardware.
     let frame = CanFdFrame::new(
         CanId::new_standard(0x141).unwrap(),
         &[0xC3; 16],
@@ -86,6 +84,7 @@ fn test_custom_sample_point_fd_interop() {
             .fd(500_000, 4_000_000)
             .unwrap()
             .sample_point(SamplePoint::PCT_87_5)
+            .data_sample_point(SamplePoint::PCT_75)
             .connect()
             .unwrap();
         ch.receive_fd_timeout(Duration::from_secs(5))
@@ -103,6 +102,7 @@ fn test_custom_sample_point_fd_interop() {
         .fd(500_000, 4_000_000)
         .unwrap()
         .sample_point(SamplePoint::PCT_87_5)
+        .data_sample_point(SamplePoint::PCT_75)
         .connect()
         .unwrap();
     pcan.transmit_fd(&frame).expect("PCAN transmit failed");
