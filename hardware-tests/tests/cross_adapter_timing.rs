@@ -398,15 +398,7 @@ fn test_fd_interop_data_4m() {
 // transmitter's error state.
 // ---------------------------------------------------------------------------
 
-// Ignored by default: this test deliberately drives the PCAN controller into
-// error-passive/bus-off by flooding at a mismatched bitrate. Repeated bus-off
-// cycling can leave a PCAN-USB adapter in a stuck state that an OS reboot does
-// not clear (only a USB-hub power-cycle does), so it is kept out of the routine
-// HIL run. Execute it on demand with a freshly power-cycled bus:
-//   cargo test -p hardware-tests --test cross_adapter_timing -- --ignored \
-//     --exact test_mismatched_timing_raises_errors
 #[test]
-#[ignore = "destructive: drives PCAN to bus-off; run explicitly on a power-cycled bus"]
 fn test_mismatched_timing_raises_errors() {
     // Deliberately mis-configure the two adapters: PCAN at 250K, Kvaser at
     // 500K. With incompatible nominal bit rates the PCAN transmitter cannot
@@ -457,16 +449,12 @@ fn test_mismatched_timing_raises_errors() {
         }
         thread::sleep(Duration::from_millis(50));
     }
-    // Drop the abused PCAN channel up front (re-initializing nothing else), and
-    // always join the listener before asserting so a failed assertion cannot
-    // leave the Kvaser thread (and its open handle) detached at process exit.
-    drop(pcan);
-    victim.join().expect("Kvaser victim thread panicked");
     assert!(
         detected,
         "expected the timing mismatch to raise TX errors or leave ErrorActive"
     );
 
+    victim.join().expect("Kvaser victim thread panicked");
     // Let the bus settle before the next test opens channels.
     thread::sleep(Duration::from_millis(200));
 }
