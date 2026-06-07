@@ -147,6 +147,7 @@ dependencies = [
  "can-hal-kvaser",
  "can-hal-pcan",
  "can-hal-rs",
+ "can-hal-socketcan",
 ]
 
 [[package]]

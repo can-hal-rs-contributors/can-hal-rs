@@ -47,10 +47,13 @@ can-hal/
 │   ├── can-hal-pcan/
 │   ├── can-hal-kvaser/
 │   └── can-hal-isotp/
-├── hardware-tests/          # Cross-adapter integration tests (physical hardware)
+├── hardware-tests/          # Integration tests (physical hardware + vcan SITL)
 │   └── tests/
-│       ├── cross_adapter.rs     # Classic CAN: PCAN <-> Kvaser
-│       └── cross_adapter_fd.rs  # CAN FD: PCAN <-> Kvaser
+│       ├── cross_adapter.rs       # Classic CAN: PCAN <-> Kvaser
+│       ├── cross_adapter_fd.rs    # CAN FD: PCAN <-> Kvaser
+│       ├── cross_adapter_timing.rs # Timing: sample points, explicit timing, bitrate matrix, mismatch
+│       ├── cross_adapter_init.rs  # Init/modes: direct FD frames, bus status, FD filters, reopen, errors
+│       └── socketcan_vcan.rs      # SocketCAN SITL over vcan0 (Linux; `vcan` feature)
 └── .github/workflows/
     ├── ci.yml               # Format, clippy, unit tests, build checks
     └── hardware-test.yml    # Self-hosted HIL tests (Windows VM + Linux)
@@ -172,20 +175,33 @@ sudo ip link set vcan0 up
 ## Hardware-in-the-Loop (HIL) Testing
 
 Hardware tests live in the `hardware-tests` crate and exercise cross-adapter communication
-(e.g., send from PCAN, receive on Kvaser and vice versa).
+(e.g., send from PCAN, receive on Kvaser and vice versa). The crate also holds the
+SocketCAN software-in-the-loop (SITL) tests, which use a `vcan` interface and need no
+physical hardware.
 
 ### Requirements
 
-- At least 2 CAN adapters on the same physical bus (PCAN-USB FD + Kvaser U100)
-- Vendor libraries installed (libpcanbasic, libcanlib)
+- Cross-adapter tests: at least 2 CAN adapters on the same physical bus (PCAN-USB FD +
+  Kvaser U100) and vendor libraries installed (libpcanbasic, libcanlib).
+- SocketCAN SITL tests: a `vcan0` interface (Linux only); no adapters or vendor libraries.
 
 ### Running Locally
 
 ```bash
+# Cross-adapter tests (PCAN <-> Kvaser; needs both adapters)
 cargo test -p hardware-tests -- --test-threads=1
+
+# SocketCAN SITL tests (needs vcan0, see "Virtual CAN Setup" above)
+cargo test -p hardware-tests --features vcan --test socketcan_vcan -- --test-threads=1
 ```
 
-`--test-threads=1` is **required** to prevent hardware contention between tests.
+`--test-threads=1` is **required**: it prevents hardware contention for the cross-adapter
+tests, and stops the SITL tests from seeing each other's frames on the shared `vcan0`.
+
+The SITL tests are behind the off-by-default `vcan` feature, so a plain
+`cargo test -p hardware-tests` excludes them (and the SocketCAN dependency) entirely. When
+`vcan0` is absent they skip cleanly; set `CAN_HAL_REQUIRE_VCAN=1` (as CI does) to turn a
+missing interface into a hard failure instead of a silent skip.
 
 ### CI Infrastructure
 
@@ -279,6 +295,7 @@ The ISO-TP crate implements ISO 15765-2 segmentation and reassembly, generic ove
 | `test` | Unit tests for `can-hal-rs` + `can-hal-isotp` |
 | `build-check` | `cargo check` for SocketCAN; clippy for PCAN + Kvaser |
 | `build-check-windows` | Cross-compile clippy for PCAN + Kvaser targeting `x86_64-pc-windows-gnu` |
+| `socketcan-sitl` | Set up a `vcan0` interface and run the SocketCAN SITL tests (`hardware-tests --features vcan --test socketcan_vcan`). No physical hardware; `CAN_HAL_REQUIRE_VCAN=1` makes a missing `vcan0` a hard failure rather than a silent skip |
 
 ### `hardware-test.yml` (manual dispatch)
 
