@@ -50,6 +50,12 @@ const DATA_MAX_BRP: u32 = 1024;
 const DATA_MAX_TSEG1: u32 = 32;
 const DATA_MAX_TSEG2: u32 = 16;
 
+/// Minimum phase-segment-2 the solver will emit. Windows CANlib rejects a
+/// tseg2 of 1 TQ with canERR_PARAM (Linux drivers accept it), so the solver
+/// keeps tseg2 >= 2 to stay portable. This never changes a default
+/// sample-point result - those already resolve to tseg2 >= 2.
+const MIN_TSEG2: u32 = 2;
+
 /// Bus type for selecting a PCAN hardware family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -301,7 +307,11 @@ fn solve_phase_timing(
         let tseg1 = tseg1_plus_one - 1;
         let tseg2 = i64::from(total_tq) - 1 - tseg1;
 
-        if tseg1 < 1 || tseg1 > i64::from(max_tseg1) || tseg2 < 1 || tseg2 > i64::from(max_tseg2) {
+        if tseg1 < 1
+            || tseg1 > i64::from(max_tseg1)
+            || tseg2 < i64::from(MIN_TSEG2)
+            || tseg2 > i64::from(max_tseg2)
+        {
             total_tq += 1;
             continue;
         }
@@ -410,6 +420,11 @@ impl PcanChannelBuilder<Initial> {
     /// Use this when you need control beyond what the solver provides
     /// (e.g., unusually large SJW values or a non-standard bitrate that
     /// doesn't divide 80 MHz evenly).
+    ///
+    /// The values are not validated here. For cross-platform timing keep
+    /// `tseg2 >= 2` in both phases: some drivers (notably Windows) reject a
+    /// phase-segment-2 of 1 TQ that other platforms accept. The solver-driven
+    /// [`fd`](Self::fd) path already guarantees this.
     #[must_use]
     pub fn fd_explicit(self, timing: PcanFdTiming) -> PcanChannelBuilder<FdExplicit> {
         PcanChannelBuilder {
@@ -602,6 +617,16 @@ mod tests {
         assert_eq!(t.brp, 8);
         assert_eq!(t.tseg1, 7);
         assert_eq!(t.tseg2, 2);
+    }
+
+    #[test]
+    fn solver_data_4m_75pct_avoids_tseg2_of_one() {
+        // A 75% data sample point at 4 Mbit/s previously resolved to a 4 TQ
+        // timing with tseg2=1, which Windows CANlib rejects (canERR_PARAM).
+        // The MIN_TSEG2 floor forces a portable solution instead.
+        let t = solve_phase_timing(4_000_000, SamplePoint::PCT_75, TimingPhase::Data).unwrap();
+        assert!(t.tseg2 >= MIN_TSEG2, "tseg2 must be >= 2, got {}", t.tseg2);
+        assert_eq!((t.brp, t.tseg1, t.tseg2, t.sjw), (1, 14, 5, 4));
     }
 
     #[test]

@@ -49,7 +49,7 @@ use can_hal_kvaser::KvaserDriver;
 let driver = KvaserDriver::new().unwrap();
 let mut channel = driver
     .channel(0)
-    .fd(500_000, 2_000_000)
+    .fd(500_000, 4_000_000)
     .unwrap()
     .connect()
     .unwrap();

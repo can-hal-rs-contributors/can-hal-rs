@@ -51,3 +51,29 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo clippy -p can-hal-pcan -p can-hal-kvaser --target x86_64-pc-windows-gnu --all-targets -- -D warnings
+
+  socketcan-sitl:
+    name: SocketCAN SITL (vcan)
+    runs-on: ubuntu-latest
+    env:
+      # Turn a missing/unconfigured vcan0 into a hard failure instead of a
+      # silent skip, so a broken setup step cannot pass this job without ever
+      # exercising the loopback. See hardware-tests/tests/socketcan_vcan.rs.
+      CAN_HAL_REQUIRE_VCAN: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Set up vcan0 interface
+        run: |
+          # vcan is an in-tree module; install the runner kernel's extra
+          # modules as a best effort in case it is not already present.
+          sudo apt-get update
+          sudo apt-get install -y "linux-modules-extra-$(uname -r)" || true
+          sudo modprobe vcan
+          sudo ip link add dev vcan0 type vcan
+          sudo ip link set up vcan0
+          ip -details link show vcan0
+      # --test socketcan_vcan runs only the SITL binary (the PCAN/Kvaser
+      # hardware tests need physical adapters); --test-threads=1 keeps the
+      # tests from seeing each other's frames on the shared vcan0.
+      - run: cargo test -p hardware-tests --features vcan --test socketcan_vcan -- --test-threads=1

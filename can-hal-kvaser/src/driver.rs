@@ -46,6 +46,12 @@ const DATA_MAX_TSEG1: u32 = 32;
 const DATA_MAX_TSEG2: u32 = 16;
 const MAX_PRESCALER: u32 = 1024;
 
+/// Minimum phase-segment-2 the solver will emit. Windows CANlib rejects a
+/// tseg2 of 1 TQ with canERR_PARAM (Linux drivers accept it), so the solver
+/// keeps tseg2 >= 2 to stay portable. This never changes a default
+/// sample-point result - those already resolve to tseg2 >= 2.
+const MIN_TSEG2: u32 = 2;
+
 /// Nominal bus parameters: (tseg1, tseg2, sjw, noSamp, syncMode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BusParams {
@@ -127,7 +133,11 @@ fn solve_phase_timing(
         let tseg1 = tseg1_plus_one - 1;
         let tseg2 = i64::from(total_tq) - 1 - tseg1;
 
-        if tseg1 < 1 || tseg1 > i64::from(max_tseg1) || tseg2 < 1 || tseg2 > i64::from(max_tseg2) {
+        if tseg1 < 1
+            || tseg1 > i64::from(max_tseg1)
+            || tseg2 < i64::from(MIN_TSEG2)
+            || tseg2 > i64::from(max_tseg2)
+        {
             total_tq += 1;
             continue;
         }
@@ -313,7 +323,7 @@ impl KvaserChannelBuilder<Initial> {
     /// the call site rather than at `connect()`):
     ///
     /// - `bitrate_hz` evenly divides the 80 MHz CANlib clock,
-    /// - `tseg1` is in `[1, 256]` and `tseg2` is in `[1, 128]`,
+    /// - `tseg1` is in `[1, 256]` and `tseg2` is in `[2, 128]`,
     /// - `bitrate_hz * (1 + tseg1 + tseg2)` evenly divides the clock, and
     /// - the resulting prescaler is in `[1, 1024]`.
     pub fn classic_explicit(
@@ -350,8 +360,8 @@ impl KvaserChannelBuilder<Initial> {
     /// the call site rather than at `connect()`):
     ///
     /// - both `nominal_hz` and `data_hz` evenly divide the 80 MHz clock,
-    /// - nominal `tseg1` in `[1, 256]`, `tseg2` in `[1, 128]`,
-    /// - data `tseg1` in `[1, 32]`, `tseg2` in `[1, 16]`,
+    /// - nominal `tseg1` in `[1, 256]`, `tseg2` in `[2, 128]`,
+    /// - data `tseg1` in `[1, 32]`, `tseg2` in `[2, 16]`,
     /// - `bitrate * (1 + tseg1 + tseg2)` evenly divides the clock for each
     ///   phase, and
     /// - each resulting prescaler is in `[1, 1024]`.
@@ -642,9 +652,9 @@ fn check_segment_bounds(tseg1: u32, tseg2: u32, phase: TimingPhase) -> Result<()
             "{phase_name} tseg1={tseg1} out of range [1, {max_tseg1}]"
         )));
     }
-    if tseg2 == 0 || tseg2 > max_tseg2 {
+    if tseg2 < MIN_TSEG2 || tseg2 > max_tseg2 {
         return Err(KvaserError::UnsupportedTiming(format!(
-            "{phase_name} tseg2={tseg2} out of range [1, {max_tseg2}]"
+            "{phase_name} tseg2={tseg2} out of range [{MIN_TSEG2}, {max_tseg2}]"
         )));
     }
     Ok(())
@@ -710,6 +720,17 @@ mod tests {
             solve_phase_timing(5_000_000, SamplePoint::DATA_DEFAULT, TimingPhase::Data).unwrap();
         assert_eq!(tseg1, 12);
         assert_eq!(tseg2, 3);
+    }
+
+    #[test]
+    fn solver_data_4m_75pct_avoids_tseg2_of_one() {
+        // A 75% data sample point at 4 Mbit/s previously resolved to a 4 TQ
+        // timing with tseg2=1, which Windows CANlib rejects (canERR_PARAM).
+        // The MIN_TSEG2 floor forces a portable solution instead.
+        let (tseg1, tseg2, sjw) =
+            solve_phase_timing(4_000_000, SamplePoint::PCT_75, TimingPhase::Data).unwrap();
+        assert!(tseg2 >= MIN_TSEG2, "tseg2 must be >= 2, got {tseg2}");
+        assert_eq!((tseg1, tseg2, sjw), (14, 5, 4));
     }
 
     #[test]
@@ -781,6 +802,14 @@ mod tests {
     fn check_segment_bounds_rejects_zero() {
         assert!(check_segment_bounds(0, 6, TimingPhase::Nominal).is_err());
         assert!(check_segment_bounds(13, 0, TimingPhase::Nominal).is_err());
+    }
+
+    #[test]
+    fn check_segment_bounds_rejects_tseg2_below_min() {
+        // tseg2=1 is accepted by some drivers but rejected by Windows CANlib;
+        // the explicit path enforces the same MIN_TSEG2 floor as the solver.
+        assert!(check_segment_bounds(13, 1, TimingPhase::Nominal).is_err());
+        assert!(check_segment_bounds(7, 1, TimingPhase::Data).is_err());
     }
 
     #[test]

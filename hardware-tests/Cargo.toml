@@ -7,8 +7,20 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# Compiles and runs the SocketCAN vcan software-in-the-loop tests
+# (tests/socketcan_vcan.rs). Off by default so a local `cargo test` neither
+# pulls in the SocketCAN backend nor needs a vcan interface (and the sudo to
+# create one). CI turns it on with `--features vcan` on the Linux runner.
+vcan = ["dep:can-hal-socketcan"]
+
 [dependencies]
 can-hal = { path = "../can-hal", package = "can-hal-rs" }
 can-hal-pcan = { path = "../can-hal-pcan" }
 can-hal-kvaser = { path = "../can-hal-kvaser" }
 can-hal-isotp = { path = "../can-hal-isotp" }
+
+# SocketCAN only exists on Linux; the vcan SITL tests are gated to Linux too,
+# and pulled in only when the `vcan` feature is enabled.
+[target.'cfg(target_os = "linux")'.dependencies]
+can-hal-socketcan = { path = "../can-hal-socketcan", optional = true }
