@@ -7,7 +7,7 @@ use can_hal::SamplePoint;
 use crate::channel::KvaserChannel;
 use crate::error::{check_status, KvaserError};
 use crate::event::ReceiveEvent;
-use crate::ffi::{KvBusParamsTq, CAN_ERR_NOT_SUPPORTED, CAN_OPEN_CAN_FD, CAN_OPEN_ACCEPT_VIRTUAL};
+use crate::ffi::{KvBusParamsTq, CAN_ERR_NOT_SUPPORTED, CAN_OPEN_ACCEPT_VIRTUAL, CAN_OPEN_CAN_FD};
 use crate::library::KvaserLibrary;
 use crate::mode::{Classic, ClassicExplicit, Fd, FdExplicit, Initial};
 
@@ -272,7 +272,7 @@ pub struct KvaserChannelBuilder<Mode> {
 /// hardware, so enabling it does not affect real devices
 impl<Mode> KvaserChannelBuilder<Mode> {
     #[must_use]
-    pub fn accept_virtual(mut self, accept: bool) -> Self {
+    pub const fn accept_virtual(mut self, accept: bool) -> Self {
         self.accept_virtual = accept;
         self
     }
