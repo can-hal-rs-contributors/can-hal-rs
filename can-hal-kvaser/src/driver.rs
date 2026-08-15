@@ -7,7 +7,7 @@ use can_hal::SamplePoint;
 use crate::channel::KvaserChannel;
 use crate::error::{check_status, KvaserError};
 use crate::event::ReceiveEvent;
-use crate::ffi::{KvBusParamsTq, CAN_ERR_NOT_SUPPORTED, CAN_OPEN_CAN_FD};
+use crate::ffi::{KvBusParamsTq, CAN_ERR_NOT_SUPPORTED, CAN_OPEN_ACCEPT_VIRTUAL, CAN_OPEN_CAN_FD};
 use crate::library::KvaserLibrary;
 use crate::mode::{Classic, ClassicExplicit, Fd, FdExplicit, Initial};
 
@@ -245,6 +245,7 @@ impl KvaserDriver {
         KvaserChannelBuilder {
             lib: Arc::clone(&self.lib),
             channel_index: index as i32,
+            accept_virtual: false,
             state: Initial,
             _mode: PhantomData,
         }
@@ -260,8 +261,21 @@ impl KvaserDriver {
 pub struct KvaserChannelBuilder<Mode> {
     lib: Arc<KvaserLibrary>,
     channel_index: i32,
+    accept_virtual: bool,
     state: Mode,
     _mode: PhantomData<Mode>,
+}
+
+/// Allow opening virtual channels (e.g. the Kvaser Virtual CAN
+/// Driver). Defaults to `false` when not called. Maps to CANlib's
+/// `canOPEN_ACCEPT_VIRTUAL` flag, which is ignored by physical
+/// hardware, so enabling it does not affect real devices
+impl<Mode> KvaserChannelBuilder<Mode> {
+    #[must_use]
+    pub const fn accept_virtual(mut self, accept: bool) -> Self {
+        self.accept_virtual = accept;
+        self
+    }
 }
 
 impl KvaserChannelBuilder<Initial> {
@@ -277,6 +291,7 @@ impl KvaserChannelBuilder<Initial> {
         Ok(KvaserChannelBuilder {
             lib: self.lib,
             channel_index: self.channel_index,
+            accept_virtual: self.accept_virtual,
             state: Classic::new(bitrate_hz, DEFAULT_NOMINAL_SAMPLE_POINT),
             _mode: PhantomData,
         })
@@ -301,6 +316,7 @@ impl KvaserChannelBuilder<Initial> {
         Ok(KvaserChannelBuilder {
             lib: self.lib,
             channel_index: self.channel_index,
+            accept_virtual: self.accept_virtual,
             state: Fd::new(
                 nominal_hz,
                 data_hz,
@@ -345,6 +361,7 @@ impl KvaserChannelBuilder<Initial> {
         Ok(KvaserChannelBuilder {
             lib: self.lib,
             channel_index: self.channel_index,
+            accept_virtual: self.accept_virtual,
             state: ClassicExplicit::new(bitrate_hz, params),
             _mode: PhantomData,
         })
@@ -389,6 +406,7 @@ impl KvaserChannelBuilder<Initial> {
         Ok(KvaserChannelBuilder {
             lib: self.lib,
             channel_index: self.channel_index,
+            accept_virtual: self.accept_virtual,
             state: FdExplicit::new(nominal_hz, data_hz, params, fd_params),
             _mode: PhantomData,
         })
@@ -410,6 +428,7 @@ impl KvaserChannelBuilder<Classic> {
         open_classic(
             &self.lib,
             self.channel_index,
+            self.accept_virtual,
             self.state.bitrate_hz(),
             &params,
         )
@@ -423,6 +442,7 @@ impl KvaserChannelBuilder<ClassicExplicit> {
         open_classic(
             &self.lib,
             self.channel_index,
+            self.accept_virtual,
             self.state.bitrate_hz(),
             self.state.params(),
         )
@@ -453,6 +473,7 @@ impl KvaserChannelBuilder<Fd> {
         open_fd(
             &self.lib,
             self.channel_index,
+            self.accept_virtual,
             self.state.nominal_hz(),
             self.state.data_hz(),
             &params,
@@ -468,6 +489,7 @@ impl KvaserChannelBuilder<FdExplicit> {
         open_fd(
             &self.lib,
             self.channel_index,
+            self.accept_virtual,
             self.state.nominal_hz(),
             self.state.data_hz(),
             self.state.params(),
@@ -482,11 +504,17 @@ impl KvaserChannelBuilder<FdExplicit> {
 fn open_classic(
     lib: &Arc<KvaserLibrary>,
     channel_index: i32,
+    accept_virtual: bool,
     bitrate_hz: u32,
     params: &BusParams,
 ) -> Result<KvaserChannel<Classic>, KvaserError> {
+    let mut flags = 0;
+    if accept_virtual {
+        flags |= CAN_OPEN_ACCEPT_VIRTUAL;
+    }
+
     // SAFETY: canOpenChannel was loaded from canlib
-    let handle = unsafe { (lib.open_channel)(channel_index, 0) };
+    let handle = unsafe { (lib.open_channel)(channel_index, flags) };
     if handle < 0 {
         return Err(KvaserError::Canlib(crate::error::KvaserStatus(handle)));
     }
@@ -523,13 +551,19 @@ fn open_classic(
 fn open_fd(
     lib: &Arc<KvaserLibrary>,
     channel_index: i32,
+    accept_virtual: bool,
     nominal_hz: u32,
     data_hz: u32,
     params: &BusParams,
     fd_params: &BusParamsFd,
 ) -> Result<KvaserChannel<Fd>, KvaserError> {
+    let mut flags = CAN_OPEN_CAN_FD;
+    if accept_virtual {
+        flags |= CAN_OPEN_ACCEPT_VIRTUAL;
+    }
+
     // SAFETY: canOpenChannel was loaded from canlib
-    let handle = unsafe { (lib.open_channel)(channel_index, CAN_OPEN_CAN_FD) };
+    let handle = unsafe { (lib.open_channel)(channel_index, flags) };
     if handle < 0 {
         return Err(KvaserError::Canlib(crate::error::KvaserStatus(handle)));
     }
