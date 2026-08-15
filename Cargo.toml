@@ -13,6 +13,13 @@ members = [
     "hardware-tests",
 ]
 
+# Bump both lines together on release; members inherit via `workspace = true`.
+[workspace.package]
+version = "0.4.2"
+
+[workspace.dependencies]
+can-hal = { version = "0.4.2", path = "can-hal", package = "can-hal-rs" }
+
 # Workspace-wide Clippy configuration
 #
 # All crates inherit these via `[lints] workspace = true`.
