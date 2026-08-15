@@ -1,6 +1,6 @@
 [package]
 name = "can-hal-kvaser-examples"
-version = "0.0.0"
+version.workspace = true
 edition = "2021"
 publish = false
 
@@ -8,5 +8,5 @@ publish = false
 workspace = true
 
 [dependencies]
-can-hal = { path = "../../can-hal", package = "can-hal-rs" }
+can-hal = { workspace = true }
 can-hal-kvaser = { path = "../../can-hal-kvaser" }
