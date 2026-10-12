@@ -15,10 +15,10 @@ members = [
 
 # Bump both lines together on release; members inherit via `workspace = true`.
 [workspace.package]
-version = "0.4.2"
+version = "0.4.3"
 
 [workspace.dependencies]
-can-hal = { version = "0.4.2", path = "can-hal", package = "can-hal-rs" }
+can-hal = { version = "0.4.3", path = "can-hal", package = "can-hal-rs" }
 
 # Workspace-wide Clippy configuration
 #
