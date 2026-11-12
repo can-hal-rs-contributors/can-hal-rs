@@ -751,3 +751,31 @@ async fn test_async_receive_ignores_escape_sf_in_classic_frame() {
 async fn test_async_fd_receive_ignores_sf_in_wrong_form() {
     assert_fd_receive_ignores(&fd_wrong_form_sfs()).await;
 }
+
+// ---------------------------------------------------------------------------
+// send() with a timeout of Duration::MAX (receive() is tested with the N_Cr
+// tests above).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_async_send_with_timeout_duration_max() {
+    let cfg = IsoTpConfig {
+        timeout: Duration::MAX,
+        ..default_config()
+    };
+    let mut isotp = AsyncIsoTpChannel::new(mock_with([fc_cts_frame()]), cfg);
+    let payload: Vec<u8> = (0..20).collect();
+    isotp.send(&payload).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_async_fd_send_with_timeout_duration_max() {
+    let cfg = IsoTpConfig {
+        timeout: Duration::MAX,
+        ..default_config()
+    };
+    let mock = AsyncFdMockChannel::new([fd_frame(&[0x30, 0, 0])]);
+    let mut isotp = AsyncIsoTpFdChannel::new(mock, cfg);
+    let payload: Vec<u8> = (0u8..126).collect();
+    isotp.send(&payload).await.unwrap();
+}

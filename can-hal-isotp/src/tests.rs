@@ -1154,3 +1154,46 @@ pub fn fd_wrong_form_sfs() -> Vec<Frame> {
 fn test_fd_receive_ignores_sf_in_wrong_form() {
     assert_fd_receive_ignores(&fd_wrong_form_sfs());
 }
+
+// ---------------------------------------------------------------------------
+// A timeout of Duration::MAX must not overflow a deadline: like the async
+// channels and tokio::time::timeout, the sync channels cap it 30 years ahead.
+// ---------------------------------------------------------------------------
+
+fn duration_max_config() -> IsoTpConfig {
+    IsoTpConfig {
+        timeout: Duration::MAX,
+        ..default_config()
+    }
+}
+
+#[test]
+fn test_receive_with_timeout_duration_max() {
+    let a: Vec<u8> = (0..13).collect();
+    let frames = vec![classic_ff(13, &a), classic_cf(1, &a[6..13])];
+    let mut ch = IsoTpChannel::new(MockChannel::new(frames), duration_max_config());
+    assert_eq!(ch.receive().unwrap(), a);
+}
+
+#[test]
+fn test_send_with_timeout_duration_max() {
+    let payload: Vec<u8> = (0..20).collect();
+    let mut ch = IsoTpChannel::new(MockChannel::new(vec![fc_cts()]), duration_max_config());
+    ch.send(&payload).unwrap();
+}
+
+#[test]
+fn test_fd_receive_with_timeout_duration_max() {
+    let a: Vec<u8> = (0u8..125).collect();
+    let frames = vec![fd_ff(125, &a), fd_cf(1, &a[62..])];
+    let mut ch = IsoTpFdChannel::new(FdMockChannel::new(frames), duration_max_config());
+    assert_eq!(ch.receive().unwrap(), a);
+}
+
+#[test]
+fn test_fd_send_with_timeout_duration_max() {
+    let payload: Vec<u8> = (0u8..126).collect();
+    let mock = FdMockChannel::new(vec![fd_frame(&[0x30, 0, 0])]);
+    let mut ch = IsoTpFdChannel::new(mock, duration_max_config());
+    ch.send(&payload).unwrap();
+}

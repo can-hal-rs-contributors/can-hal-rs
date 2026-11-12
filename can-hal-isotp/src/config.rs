@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use can_hal::CanId;
 
@@ -48,6 +48,8 @@ pub struct IsoTpConfig {
     /// Timeout for each wait: for the first SF or FF in `receive`, for each FC
     /// in `send` (N_Bs, which an FC(Wait) does not restart), and for each CF in
     /// `receive` (N_Cr). A frame that is ignored doesn't restart a wait.
+    /// `Duration::MAX` (or any timeout too long to add to the current time)
+    /// waits 30 years, which is to say without a limit.
     pub timeout: Duration,
     /// Padding for transmitted frames.
     ///
@@ -135,6 +137,13 @@ impl IsoTpConfig {
     /// When a wait on `timeout` that starts now must end: `now + timeout`, or
     /// [`FAR_FUTURE`] from now if that overflows, so that a `timeout` of
     /// `Duration::MAX` waits indefinitely instead of panicking.
+    pub(crate) fn deadline(&self) -> Instant {
+        let now = Instant::now();
+        now.checked_add(self.timeout)
+            .unwrap_or_else(|| now + FAR_FUTURE)
+    }
+
+    /// [`deadline`](Self::deadline) as a Tokio `Instant`.
     #[cfg(feature = "async")]
     pub(crate) fn tokio_deadline(&self) -> tokio::time::Instant {
         let now = tokio::time::Instant::now();
@@ -145,5 +154,4 @@ impl IsoTpConfig {
 
 /// How far ahead a deadline goes when `now + timeout` overflows: 30 years,
 /// the cap `tokio::time::timeout` uses.
-#[cfg(feature = "async")]
 const FAR_FUTURE: Duration = Duration::from_secs(86_400 * 365 * 30);

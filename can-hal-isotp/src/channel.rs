@@ -133,7 +133,7 @@ where
     /// Receive an ISO-TP message. Handles reassembly from SF or FF+CF sequences.
     pub fn receive(&mut self) -> Result<Vec<u8>, IsoTpError<E>> {
         let overhead = self.config.overhead();
-        let deadline = Instant::now() + self.config.timeout;
+        let deadline = self.config.deadline();
 
         // Wait for first frame (SF or FF) from rx_id
         loop {
@@ -183,7 +183,7 @@ where
                     let mut block_count: u16 = 0;
 
                     // Receive Consecutive Frames
-                    let mut cf_deadline = Instant::now() + self.config.timeout;
+                    let mut cf_deadline = self.config.deadline();
                     while result.len() < total_len {
                         let remaining = cf_deadline.saturating_duration_since(Instant::now());
                         if remaining.is_zero() {
@@ -228,7 +228,7 @@ where
                                 block_count += 1;
 
                                 // Reset CF deadline on each successful CF
-                                cf_deadline = Instant::now() + self.config.timeout;
+                                cf_deadline = self.config.deadline();
 
                                 // Send FC every block_size frames (if block_size > 0)
                                 if self.config.block_size > 0
@@ -254,7 +254,7 @@ where
                                 self.send_fc(FcFlag::ContinueToSend)?;
                                 expected_sn = 1;
                                 block_count = 0;
-                                cf_deadline = Instant::now() + self.config.timeout;
+                                cf_deadline = self.config.deadline();
                             }
                             // An FC is meant for a sender; a receiver ignores it.
                             IsoTpFrame::FlowControl { .. } => {}
@@ -272,7 +272,7 @@ where
     /// Wait for a Flow Control frame. Returns (block_size, st_min_duration).
     fn wait_for_fc(&mut self) -> Result<(u8, Duration), IsoTpError<E>> {
         let overhead = self.config.overhead();
-        let deadline = Instant::now() + self.config.timeout;
+        let deadline = self.config.deadline();
         let mut wait_count: u8 = 0;
 
         loop {
