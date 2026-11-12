@@ -1233,3 +1233,72 @@ fn test_receive_ignores_short_ff() {
 fn test_fd_receive_ignores_short_ff() {
     assert_fd_receive_ignores(&[fd_frame(&SHORT_FF)]);
 }
+
+// ---------------------------------------------------------------------------
+// With a block size of 0 (no limit), a message of more than u16::MAX CFs
+// must not overflow the block count (a debug build panicked).
+// ---------------------------------------------------------------------------
+
+/// CFs in the messages below: one more than a u16 can count.
+pub const MANY_CFS: usize = 65_536;
+
+/// A message of `MANY_CFS` CFs after a long FF that carries `ff_bytes`.
+#[allow(clippy::cast_possible_truncation)]
+pub fn many_cf_payload(ff_bytes: usize, cf_bytes: usize) -> Vec<u8> {
+    (0..ff_bytes + MANY_CFS * cf_bytes)
+        .map(|i| i as u8)
+        .collect()
+}
+
+/// The frames of a long classic message: an FF carrying 2 bytes, then CFs.
+#[allow(clippy::cast_possible_truncation)]
+pub fn classic_message(payload: &[u8]) -> Vec<CanFrame> {
+    let mut frames = vec![classic_ff(payload.len(), payload)];
+    for (i, chunk) in payload[2..].chunks(7).enumerate() {
+        frames.push(classic_cf(((i + 1) & 0x0F) as u8, chunk));
+    }
+    frames
+}
+
+/// The frames of a long FD message: an FF carrying 58 bytes, then CFs.
+#[allow(clippy::cast_possible_truncation)]
+pub fn fd_message(payload: &[u8]) -> Vec<Frame> {
+    let mut frames = vec![fd_ff(payload.len(), payload)];
+    for (i, chunk) in payload[58..].chunks(63).enumerate() {
+        frames.push(fd_cf(((i + 1) & 0x0F) as u8, chunk));
+    }
+    frames
+}
+
+#[test]
+fn test_send_65536_cfs_with_block_size_0() {
+    let payload = many_cf_payload(2, 7);
+    let mut ch = IsoTpChannel::new(MockChannel::new(vec![fc_cts()]), default_config());
+    ch.send(&payload).unwrap();
+    assert_eq!(ch.into_inner().tx_frames.len(), 1 + MANY_CFS);
+}
+
+#[test]
+fn test_receive_65536_cfs_with_block_size_0() {
+    let payload = many_cf_payload(2, 7);
+    let mock = MockChannel::new(classic_message(&payload));
+    let mut ch = IsoTpChannel::new(mock, default_config());
+    assert_eq!(ch.receive().unwrap(), payload);
+}
+
+#[test]
+fn test_fd_send_65536_cfs_with_block_size_0() {
+    let payload = many_cf_payload(58, 63);
+    let mock = FdMockChannel::new(vec![fd_frame(&[0x30, 0, 0])]);
+    let mut ch = IsoTpFdChannel::new(mock, default_config());
+    ch.send(&payload).unwrap();
+    assert_eq!(ch.into_inner().tx_frames.len(), 1 + MANY_CFS);
+}
+
+#[test]
+fn test_fd_receive_65536_cfs_with_block_size_0() {
+    let payload = many_cf_payload(58, 63);
+    let mock = FdMockChannel::new(fd_message(&payload));
+    let mut ch = IsoTpFdChannel::new(mock, default_config());
+    assert_eq!(ch.receive().unwrap(), payload);
+}

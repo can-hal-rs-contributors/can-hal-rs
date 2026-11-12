@@ -74,7 +74,10 @@ impl AsyncReceive for AsyncMockChannel {
             .expect("rx_queue unexpectedly empty");
         let delay = self.rx_delay;
         async move {
-            tokio::time::sleep(delay).await;
+            // Even a zero sleep waits for the timer's next 1 ms tick.
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
             Ok(Timestamped::new(frame, Instant::now()))
         }
     }
@@ -124,7 +127,10 @@ impl AsyncReceiveFd for AsyncFdMockChannel {
             .expect("rx_queue unexpectedly empty");
         let delay = self.rx_delay;
         async move {
-            tokio::time::sleep(delay).await;
+            // Even a zero sleep waits for the timer's next 1 ms tick.
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
             Ok(Timestamped::new(frame, Instant::now()))
         }
     }
@@ -792,4 +798,40 @@ async fn test_async_receive_ignores_short_ff() {
 #[tokio::test]
 async fn test_async_fd_receive_ignores_short_ff() {
     assert_fd_receive_ignores(&[fd_frame(&SHORT_FF)]).await;
+}
+
+// ---------------------------------------------------------------------------
+// With a block size of 0, more than u16::MAX CFs (see tests.rs).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_async_send_65536_cfs_with_block_size_0() {
+    let payload = many_cf_payload(2, 7);
+    let mut isotp = AsyncIsoTpChannel::new(mock_with([fc_cts_frame()]), default_config());
+    isotp.send(&payload).await.unwrap();
+    assert_eq!(isotp.into_inner().tx_frames.len(), 1 + MANY_CFS);
+}
+
+#[tokio::test]
+async fn test_async_receive_65536_cfs_with_block_size_0() {
+    let payload = many_cf_payload(2, 7);
+    let mut isotp = AsyncIsoTpChannel::new(mock_with(classic_message(&payload)), default_config());
+    assert_eq!(isotp.receive().await.unwrap(), payload);
+}
+
+#[tokio::test]
+async fn test_async_fd_send_65536_cfs_with_block_size_0() {
+    let payload = many_cf_payload(58, 63);
+    let mock = AsyncFdMockChannel::new([fd_frame(&[0x30, 0, 0])]);
+    let mut isotp = AsyncIsoTpFdChannel::new(mock, default_config());
+    isotp.send(&payload).await.unwrap();
+    assert_eq!(isotp.into_inner().tx_frames.len(), 1 + MANY_CFS);
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_65536_cfs_with_block_size_0() {
+    let payload = many_cf_payload(58, 63);
+    let mock = AsyncFdMockChannel::new(fd_message(&payload));
+    let mut isotp = AsyncIsoTpFdChannel::new(mock, default_config());
+    assert_eq!(isotp.receive().await.unwrap(), payload);
 }

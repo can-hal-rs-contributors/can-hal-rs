@@ -76,7 +76,11 @@ where
 
             offset = end;
             sn = (sn + 1) & 0x0F;
-            block_count += 1;
+            // Counted only under a block size: with BS 0 nothing resets
+            // the count, so a long message would overflow it.
+            if fc_bs > 0 {
+                block_count += 1;
+            }
 
             if offset < data.len() {
                 if !st_min_dur.is_zero() {
@@ -214,7 +218,10 @@ where
                     collected.extend_from_slice(&data[..take]);
 
                     expected_sn = (expected_sn + 1) & 0x0F;
-                    block_count += 1;
+                    // Counted only under a block size, as in send().
+                    if self.config.block_size > 0 {
+                        block_count += 1;
+                    }
 
                     cf_deadline = self.config.tokio_deadline();
 
