@@ -81,31 +81,37 @@ any backend:
 | `Async*` variants | Async versions of Transmit/Receive/TransmitFd/ReceiveFd (behind `async` feature) |
 
 There is no shared `Driver` or `ChannelBuilder` trait. Each backend exposes its own
-concrete driver type and a **typestate-driven builder**: an `Initial` state transitions
-to `Classic`, `Fd`, or one of the `*Explicit` raw-timing states, and only the methods
-valid for the current state are callable. Invalid combinations (e.g., `data_sample_point`
-in classic mode, `transmit_fd` on a classic channel, mixing solver-driven sample-point
-setters with raw segment values) are compile errors, not runtime ones. Channels are
-likewise parameterized: `PcanChannel<Classic>` implements `Transmit + Receive`;
-`PcanChannel<Fd>` implements `TransmitFd + ReceiveFd`. Both implement `Filterable`
-and `BusStatus`.
+concrete driver type. PCAN and Kvaser have a **typestate-driven builder**: an `Initial`
+state transitions to `Classic`, `Fd`, or one of the `*Explicit` raw-timing states, and
+only the methods valid for the current state are callable. Invalid combinations (e.g.,
+`data_sample_point` in classic mode, `transmit_fd` on a classic channel, mixing
+solver-driven sample-point setters with raw segment values) are compile errors, not
+runtime ones. Their channels are likewise parameterized: `PcanChannel<Classic>`
+implements `Transmit + Receive`; `PcanChannel<Fd>` implements `TransmitFd + ReceiveFd`.
+Both implement `Filterable` and `BusStatus`. SocketCAN's timing is set by the OS, so its
+builder only picks the interface, and one `SocketCanChannel` implements both the classic
+and FD traits, plus `Filterable`.
 
-Sample points are wrapped in a [`can_hal::SamplePoint`] newtype with a `const fn`
+Sample points are wrapped in a `can_hal::SamplePoint` newtype with a `const fn`
 constructor that asserts `[500, 950]` per-mille at compile time when used in a
 `const` context. Use `SamplePoint::NOMINAL_DEFAULT` (70%) and `SamplePoint::DATA_DEFAULT`
 (80%) for the workspace-wide interop conventions.
 
-**Filter semantics vary by backend:** SocketCAN supports multiple independent filters
-(union semantics), while PCAN and Kvaser support a single ID+mask pair per frame type.
-Code that uses `Filterable` must be aware of this.
+**Filter semantics vary by backend**, but only within an ID type. Every backend keeps
+`Filter`'s contract: a filter matches only frames of its own ID type (standard or
+extended), so a frame type with no filter in the set is rejected. SocketCAN applies each
+filter exactly (union semantics). PCAN and Kvaser keep one acceptance window per frame
+type, widened to cover every filter (an ID range on PCAN, a code+mask on Kvaser), so
+several filters can accept IDs no filter names. Code that uses `Filterable` must be aware
+of this.
 
 ### Builder API per backend
 
 | Backend | Classic | FD | Sample-point setters | Raw escape hatch |
 |---|---|---|---|---|
-| SocketCAN | `driver.channel_by_name(name).connect()?` (timing OS-managed) | n/a | n/a (no setters) | n/a |
-| PCAN | `driver.channel(0)?.classic(ClassicBitrate::Br500K).connect()?` (enum, infallible) | `driver.channel(0)?.fd(500_000, 4_000_000)?.connect()?` | `<Fd>` only (none in classic; use `fd(rate, rate)` for custom classic timing) | `<Initial>::fd_explicit(PcanFdTiming)` -> `<FdExplicit>` |
-| Kvaser | `driver.channel(0).classic(500_000)?.connect()?` (`channel()` infallible; all four bitrate-taking transitions - `classic`, `fd`, `classic_explicit`, `fd_explicit` - fail on divisibility of the device's clock, as CANlib reports it, or 80 MHz when it doesn't; the `_explicit` variants additionally check segment bounds, `(bitrate * (1 + tseg1 + tseg2))` divisibility, and prescaler `[1, 1024]`) | `driver.channel(0).fd(500_000, 4_000_000)?.connect()?` | both `<Classic>` and `<Fd>` | `<Initial>::classic_explicit(hz, BusParams)?` / `fd_explicit(hz, hz, BusParams, BusParamsFd)?` |
+| SocketCAN | `driver.channel_by_name(name).connect()?` (timing OS-managed) | the same channel (FD is turned on at the OS level) | n/a (no setters) | n/a |
+| PCAN | `driver.channel(0)?.classic(ClassicBitrate::Br500K).connect()?` (enum, infallible) | `driver.channel(0)?.fd(500_000, 4_000_000)?.connect()?` | `<Fd>` only (classic takes PCAN-Basic's predefined bitrates; `fd(rate, rate)` takes a sample point but sends FD frames, which classic-only nodes reject) | `<Initial>::fd_explicit(PcanFdTiming)` -> `<FdExplicit>` |
+| Kvaser | `driver.channel(0).classic(500_000)?.connect()?` (`channel()` infallible; all four bitrate-taking transitions - `classic`, `fd`, `classic_explicit`, `fd_explicit` - fail on divisibility of the device's clock, as CANlib reports it, or 80 MHz when it doesn't; the `_explicit` variants additionally check segment bounds, `(bitrate * (1 + tseg1 + tseg2))` divisibility, and prescaler `[1, 1024]`) | `driver.channel(0).fd(500_000, 4_000_000)?.connect()?` | `sample_point` on `<Classic>`; `sample_point` and `data_sample_point` on `<Fd>` | `<Initial>::classic_explicit(hz, BusParams)?` / `fd_explicit(hz, hz, BusParams, BusParamsFd)?` |
 
 ## Build and Development
 
@@ -240,52 +246,68 @@ passthrough; the hub power cycle after the VM releases them returns them to the 
 
 ## CAN Bus Timing
 
-Timing parameters must match across all adapters on the same bus, or nodes will go bus-off.
+Every node on a bus must use the same bitrates, and their sample points should be close.
+A mismatch causes bit errors that can drive nodes to bus-off: on the HIL bench, an earlier
+FD nominal timing of 80% on PCAN against 87.5% on Kvaser, with a 4 Mbit/s data phase, did
+so after a few ISO-TP transfers.
 
-**Nominal CAN (500 Kbit/s, 20 TQ):**
+The workspace convention, which both FD solvers produce by default on an 80 MHz clock:
+
+**Nominal (500 kbit/s, 20 TQ, 70%):**
 - `freq_hz=500000, tseg1=13, tseg2=6, sjw=4`
 
-**CAN FD Data Phase (4 Mbit/s, 10 TQ):**
+**CAN FD data phase (4 Mbit/s, 10 TQ, 80%):**
 - `freq_hz=4000000, tseg1=7, tseg2=2, sjw=2`
+
+Classic CAN differs: PCAN's `ClassicBitrate::Br500K` is PCAN-Basic's predefined BTR0/BTR1
+value `0x001C` (16 TQ, 87.5%, SJW 1), while Kvaser's classic builder defaults to 70%.
+Classic PCAN <-> Kvaser works on the bench despite the difference.
 
 ### Backend-Specific Timing Notes
 
-- **PCAN**: 80 MHz clock. The builder runs an internal solver that derives
-  `(brp, tseg1, tseg2, sjw)` from `.fd(nominal, data)` plus optional
-  `.sample_point(SamplePoint)` / `.data_sample_point(SamplePoint)`. Sample
-  points default to 70% (nominal) and 80% (data). For raw per-segment
-  control, transition straight from `<Initial>` to `<FdExplicit>` via
-  `.fd_explicit(PcanFdTiming)`. Classic CAN uses the predefined
-  `ClassicBitrate` enum and has no sample-point control (PCAN-Basic API
-  limitation).
+- **PCAN**: FD timing uses an 80 MHz clock (`f_clock_mhz=80`). The builder runs
+  an internal solver that derives `(brp, tseg1, tseg2, sjw)` from
+  `.fd(nominal, data)` plus optional `.sample_point(SamplePoint)` /
+  `.data_sample_point(SamplePoint)`. Sample points default to 70% (nominal) and
+  80% (data). For raw per-segment control, transition straight from `<Initial>`
+  to `<FdExplicit>` via `.fd_explicit(PcanFdTiming)`. Classic CAN takes one of
+  PCAN-Basic's predefined bitrates (the `ClassicBitrate` enum), each with a
+  fixed timing, so it has no sample-point control. PCAN-Basic's
+  `CAN_Initialize` also accepts a custom BTR0/BTR1 register value, which
+  can-hal doesn't expose.
 - **Kvaser**: the device's clock, from CANlib's `canCHANNELDATA_CLOCK_INFO`,
   or 80 MHz when it isn't reported (Linux CANlib doesn't for a Leaf Light v2,
   whose CAN clock is 16 MHz, or for virtual channels). Classic timing with an
   unknown clock is solved for 8 MHz first, which fits 16, 24, 32 and 80 MHz
-  clocks (16 TQ at 250 and 500 kbit/s). Same solver shape as PCAN. Classic and FD
-  builders both honor `.sample_point()` / `.data_sample_point()`. For raw
-  control, use `.classic_explicit(hz, BusParams)?` or
+  clocks (16 TQ at 250 and 500 kbit/s). Same solver shape as PCAN. The classic
+  builder takes `.sample_point()`, and the FD builder `.sample_point()` and
+  `.data_sample_point()`. `clock_hz()` on the builder returns the clock bitrates
+  and explicit timing are checked against, and `reported_clock_hz()` returns
+  `None` when that is the 80 MHz fallback. For raw control, use
+  `.classic_explicit(hz, BusParams)?` or
   `.fd_explicit(hz, hz, BusParams, BusParamsFd)?` on `<Initial>`. The
   `libcanlib.so.1` on Linux does **not** accept predefined bitrate constants
   (negative frequency values like `-2` for 500K); these return
   `canERR_PARAM`. Always pass explicit `freq_hz` + segment values.
 - **SocketCAN**: Bitrate is configured at the OS level (`ip link set can0 type can
-  bitrate 500000`), not through the socket API. The builder has no timing methods.
+  bitrate 500000`, plus `dbitrate 4000000 fd on` for CAN FD), not through the socket
+  API. The builder has no timing methods.
 
 ## Backend Architecture
 
-All three backends follow the same pattern:
+PCAN and Kvaser follow this pattern; SocketCAN has only `driver.rs` (a plain builder),
+`channel.rs`, `convert.rs` and `error.rs`:
 
 | File | Purpose |
 |---|---|
 | `driver.rs` | Concrete driver type + typestate `ChannelBuilder<Mode>` |
-| `mode.rs` | Type-state markers (`Initial`, `Classic`, `Fd`, `*Explicit`) with private state |
+| `mode.rs` | Type-state markers (`Initial`, `Classic`, `Fd`, `*Explicit`) with private state (PCAN and Kvaser only) |
 | `channel.rs` | `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable` impls (split by mode); `BusStatus` on PCAN/Kvaser only |
 | `convert.rs` | Conversions between `can-hal` frame types and vendor-specific types |
 | `error.rs` | Backend error type implementing `CanError` |
 | `ffi.rs` | FFI bindings (PCAN and Kvaser only) |
 | `library.rs` | Dynamic library loading via `libloading` (PCAN and Kvaser only) |
-| `event.rs` | Status/event callbacks (PCAN and Kvaser only) |
+| `event.rs` | Receive-ready event (a Windows event `HANDLE` or a Linux fd) that the receive calls block on instead of polling (PCAN and Kvaser only) |
 
 ### Key Design Decisions
 
@@ -299,14 +321,17 @@ All three backends follow the same pattern:
 
 ## ISO-TP (can-hal-isotp)
 
-The ISO-TP crate implements ISO 15765-2 segmentation and reassembly, generic over any
-`Transmit + Receive` channel.
+The ISO-TP crate implements ISO 15765-2 segmentation and reassembly, generic over the
+CAN channel: `IsoTpChannel` needs `Transmit + Receive`, `IsoTpFdChannel` needs
+`TransmitFd + ReceiveFd`, and the async channels need the `Async*` equivalents.
 
 **Key types:**
 - `IsoTpChannel<C>` - classic CAN transport (up to 4095 bytes via short FF; up to 4 GB via long FF)
 - `IsoTpFdChannel<C>` - CAN FD transport (same limits)
 - `IsoTpConfig` - TX/RX CAN IDs, addressing mode
-- `AddressingMode` - Normal, Extended, Functional
+- `AddressingMode` - `Normal` or `Extended { tx_target_address, rx_target_address }`;
+  functional (broadcast) requests use `IsoTpConfig::functional_id` with `send_functional`
+  (single frame only, non-FD channels)
 
 **Async support:** Enable the `async` feature for `AsyncIsoTpChannel` and
 `AsyncIsoTpFdChannel` (backed by `tokio`).
