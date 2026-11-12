@@ -13,10 +13,12 @@ you encounter something unexpected.
 - This is a Rust workspace (resolver v2, edition 2021, MSRV 1.81). Use idiomatic Rust.
 - The MSRV is declared once, as `rust-version` in the root `Cargo.toml`'s
   `[workspace.package]`; every member inherits it with `rust-version.workspace = true`.
-  CI's `msrv` job checks it. To raise it, change that line and the README's badge.
+  CI's `msrv` job checks it. To raise it, change that line, the MSRV badge in all six
+  READMEs, the "1.81" in `can-hal/README.md`, and the two mentions in this file.
   `.cargo/config.toml` makes `cargo update` keep to versions that support it.
 - The core `can-hal` crate has **zero dependencies** and must stay that way. It is
-  `no_std`-compatible by default; the `std` feature is opt-in.
+  `no_std`-compatible: the `std` feature is on by default, and `default-features = false`
+  builds it without std (CI's `msrv` job checks this). `can-hal-isotp` needs std.
 - Backend crates (`can-hal-socketcan`, `can-hal-pcan`, `can-hal-kvaser`) use **dynamic
   library loading** via `libloading` (PCAN and Kvaser) or the system `socketcan` crate.
   Do not introduce compile-time links to vendor libraries.
@@ -51,15 +53,16 @@ can-hal/
 │   ├── can-hal-pcan/
 │   ├── can-hal-kvaser/
 │   └── can-hal-isotp/
-├── hardware-tests/          # Integration tests (physical hardware + vcan SITL)
+├── hardware-tests/          # Integration tests (physical hardware + software-in-the-loop)
 │   └── tests/
 │       ├── cross_adapter.rs       # Classic CAN: PCAN <-> Kvaser
 │       ├── cross_adapter_fd.rs    # CAN FD: PCAN <-> Kvaser
 │       ├── cross_adapter_timing.rs # Timing: sample points, explicit timing, bitrate matrix, mismatch
 │       ├── cross_adapter_init.rs  # Init/modes: direct FD frames, bus status, FD filters, reopen, errors
+│       ├── kvaser_virtual.rs      # Kvaser CANlib SITL over virtual channels (`kvaser-virtual` feature)
 │       └── socketcan_vcan.rs      # SocketCAN SITL over vcan0 (Linux; `vcan` feature)
 └── .github/workflows/
-    ├── ci.yml               # Format, clippy, unit tests, build checks
+    ├── ci.yml               # Format, clippy, unit tests, build checks, SocketCAN SITL, MSRV
     └── hardware-test.yml    # Self-hosted HIL tests (Windows VM + Linux)
 ```
 
@@ -109,7 +112,8 @@ Code that uses `Filterable` must be aware of this.
 ### Prerequisites
 
 - Rust toolchain >= 1.81 (install via [rustup](https://rustup.rs))
-- **SocketCAN backend**: Linux with kernel CAN headers (available on most distros)
+- **SocketCAN backend**: Linux only (socketcan's build script refuses other targets); no
+  system headers or C libraries needed
 - **PCAN backend**: `libpcanbasic.so` (Linux) or `PCANBasic.dll` (Windows) from PEAK
 - **Kvaser backend**: `libcanlib.so.1` (Linux) or `canlib32.dll` (Windows) from KVASER
 - **Hardware tests**: Physical PCAN and Kvaser adapters connected to the same CAN bus
@@ -120,14 +124,17 @@ Code that uses `Filterable` must be aware of this.
 # Format check
 cargo fmt --check
 
-# Lint core + ISO-TP (the crates that build without vendor libraries)
+# Lint core + ISO-TP
 cargo clippy -p can-hal-rs -p can-hal-isotp --all-targets --features async -- -D warnings
 
-# Lint hardware backend crates (requires headers/libs or cross-compile target)
+# Lint the PCAN and Kvaser backends (no vendor SDK needed: they load it at runtime)
 cargo clippy -p can-hal-pcan -p can-hal-kvaser --all-targets -- -D warnings
 
 # Unit tests (core traits + ISO-TP)
 cargo test -p can-hal-rs -p can-hal-isotp --features async
+
+# Unit tests (backends; SocketCAN builds on Linux only)
+cargo test -p can-hal-socketcan -p can-hal-pcan -p can-hal-kvaser
 
 # Build check for SocketCAN (Linux only)
 cargo check -p can-hal-socketcan
@@ -139,14 +146,14 @@ cargo clippy -p can-hal-pcan -p can-hal-kvaser \
 
 ### Running Examples
 
-Each backend has an example crate under `examples/`, exposing one
-`[[example]]` per file. Run via `cargo run -p <crate> --example <name>`:
+Each backend has an example crate under `examples/`, with one example per file in its
+`examples/` directory. Run via `cargo run -p <crate> --example <name>`:
 
 ```bash
-# SocketCAN (requires vcan0 or physical interface)
-cargo run -p can-hal-socketcan-examples --example socketcan_send
-cargo run -p can-hal-socketcan-examples --example socketcan_receive
-cargo run -p can-hal-socketcan-examples --example filter
+# SocketCAN (the interface defaults to can0; name another, such as vcan0, after --)
+cargo run -p can-hal-socketcan-examples --example socketcan_send -- vcan0
+cargo run -p can-hal-socketcan-examples --example socketcan_receive -- vcan0
+cargo run -p can-hal-socketcan-examples --example filter -- vcan0
 
 # PCAN (requires PCAN hardware + library)
 cargo run -p can-hal-pcan-examples --example pcan_send
@@ -179,15 +186,17 @@ sudo ip link set vcan0 up
 ## Hardware-in-the-Loop (HIL) Testing
 
 Hardware tests live in the `hardware-tests` crate and exercise cross-adapter communication
-(e.g., send from PCAN, receive on Kvaser and vice versa). The crate also holds the
-SocketCAN software-in-the-loop (SITL) tests, which use a `vcan` interface and need no
-physical hardware.
+(e.g., send from PCAN, receive on Kvaser and vice versa). The crate also holds two
+software-in-the-loop (SITL) suites that need no physical hardware: SocketCAN over a `vcan`
+interface, and Kvaser CANlib over its virtual channels.
 
 ### Requirements
 
 - Cross-adapter tests: at least 2 CAN adapters on the same physical bus (PCAN-USB FD +
   Kvaser U100) and vendor libraries installed (libpcanbasic, libcanlib).
 - SocketCAN SITL tests: a `vcan0` interface (Linux only); no adapters or vendor libraries.
+- Kvaser SITL tests: CANlib and its virtual driver (on Linux, linuxcan's `virtualcan`; on
+  Windows, the CANlib driver installs virtual channels by default); no adapters.
 
 ### Running Locally
 
@@ -197,27 +206,37 @@ cargo test -p hardware-tests -- --test-threads=1
 
 # SocketCAN SITL tests (needs vcan0, see "Virtual CAN Setup" above)
 cargo test -p hardware-tests --features vcan --test socketcan_vcan -- --test-threads=1
+
+# Kvaser SITL tests (needs CANlib's virtual channels)
+CAN_HAL_REQUIRE_KVASER_VIRTUAL=1 cargo test -p hardware-tests --features kvaser-virtual \
+  --test kvaser_virtual -- --test-threads=1
 ```
 
 `--test-threads=1` is **required**: it prevents hardware contention for the cross-adapter
-tests, and stops the SITL tests from seeing each other's frames on the shared `vcan0`.
+tests, and stops the SITL tests from seeing each other's frames on the shared `vcan0` or
+virtual bus.
 
-The SITL tests are behind the off-by-default `vcan` feature, so a plain
-`cargo test -p hardware-tests` excludes them (and the SocketCAN dependency) entirely. When
-`vcan0` is absent they skip cleanly; set `CAN_HAL_REQUIRE_VCAN=1` (as CI does) to turn a
-missing interface into a hard failure instead of a silent skip.
+The SITL tests are behind the off-by-default `vcan` and `kvaser-virtual` features, so a
+plain `cargo test -p hardware-tests` excludes them (and the SocketCAN dependency) entirely.
+When `vcan0` is absent the SocketCAN tests skip cleanly; set `CAN_HAL_REQUIRE_VCAN=1` (as
+CI does) to turn a missing interface into a hard failure instead of a silent skip. The
+Kvaser tests likewise skip when CANlib or the channels are missing, unless
+`CAN_HAL_REQUIRE_KVASER_VIRTUAL=1` is set. They use CANlib channels 0 and 1 unless
+`CAN_HAL_KVASER_VIRTUAL_CHANNELS="<tx>,<rx>"` names others, as it must when a physical
+Kvaser interface comes first. No CI job runs them; the `msrv` job only compiles them.
 
 ### CI Infrastructure
 
 The hardware CI runs on a self-hosted NixOS runner with physical CAN adapters:
 
-1. **Windows tests first**: Starts a Windows VM, attaches USB devices via passthrough,
-   runs `cargo test -p hardware-tests` over SSH.
-2. **Linux tests second**: After the VM releases USB devices, binds them to host drivers
-   and runs the same tests natively.
+1. **Windows tests first**: Starts a Windows VM, power-cycles the adapters' USB hub
+   (`uhubctl`), attaches the devices to the VM, runs
+   `cargo test -p hardware-tests -- --test-threads=1` over SSH, stops the VM and
+   power-cycles the hub again.
+2. **Linux tests second**: Once the Windows job succeeds, runs the same tests natively.
 
 This sequential ordering exists because USB devices are free (unbound) at boot for VM
-passthrough, and must be explicitly returned to the host for Linux testing.
+passthrough; the hub power cycle after the VM releases them returns them to the host.
 
 ## CAN Bus Timing
 
@@ -300,18 +319,18 @@ The ISO-TP crate implements ISO 15765-2 segmentation and reassembly, generic ove
 |---|---|
 | `fmt` | `cargo fmt --check` |
 | `clippy` | Lint `can-hal-rs` + `can-hal-isotp` with `--features async` |
-| `test` | Unit tests for `can-hal-rs` + `can-hal-isotp` |
+| `test` | Unit tests for `can-hal-rs` + `can-hal-isotp` (with `async`), and for `can-hal-socketcan`, `can-hal-pcan` and `can-hal-kvaser` |
 | `build-check` | `cargo check` for SocketCAN; clippy for PCAN + Kvaser |
 | `build-check-windows` | Cross-compile clippy for PCAN + Kvaser targeting `x86_64-pc-windows-gnu` |
 | `socketcan-sitl` | Set up a `vcan0` interface and run the SocketCAN SITL tests (`hardware-tests --features vcan --test socketcan_vcan`). No physical hardware; `CAN_HAL_REQUIRE_VCAN=1` makes a missing `vcan0` a hard failure rather than a silent skip |
-| `msrv` | Install the MSRV read from the workspace's `rust-version`, check every crate with it on Linux and for `x86_64-pc-windows-gnu` (the SocketCAN crates on Linux only), check `can-hal-rs` + `can-hal-isotp` without std, and run their unit tests |
+| `msrv` | Install the MSRV read from the workspace's `rust-version`; check every crate with it on Linux, and for `x86_64-pc-windows-gnu` except the SocketCAN crates and the ISO-TP examples; check `can-hal-rs` without std for `thumbv7em-none-eabihf` (with and without `async`); run the `can-hal-rs` + `can-hal-isotp` unit tests |
 
-### `hardware-test.yml` (manual dispatch)
+### `hardware-test.yml` (manual dispatch, or a PR labelled `run-hardware-tests`, again on each push)
 
 | Job | What it does |
 |---|---|
-| `windows-hardware-tests` | Start Windows VM, attach USB, run hardware tests via SSH |
-| `linux-hardware-tests` | After Windows completes, bind USB to host, run hardware tests natively |
+| `windows-hardware-tests` | Run the hardware tests in the Windows VM via SSH (see CI Infrastructure) |
+| `linux-hardware-tests` | Once the Windows job succeeds, run the hardware tests natively |
 
 ## Key Files to Know
 
@@ -329,7 +348,8 @@ The ISO-TP crate implements ISO 15765-2 segmentation and reassembly, generic ove
 ## Code Style
 
 - Follow `rustfmt` defaults (no custom config).
-- All warnings are errors in CI (`-D warnings` via clippy).
+- Treat warnings as errors: CI runs clippy with `-D warnings` on `can-hal-rs`,
+  `can-hal-isotp`, `can-hal-pcan` and `can-hal-kvaser`.
 - Use `snake_case` for functions/variables, `CamelCase` for types, `UPPER_CASE` for
   constants.
 - Keep `unsafe` blocks minimal and well-documented. The FFI layers in PCAN/Kvaser contain
@@ -344,7 +364,9 @@ Before submitting changes:
 
 1. **Format**: `cargo fmt --check`
 2. **Lint**: `cargo clippy -p can-hal-rs -p can-hal-isotp --all-targets --features async -- -D warnings`
-3. **Unit tests**: `cargo test -p can-hal-rs -p can-hal-isotp --features async`
+3. **Unit tests**:
+   - `cargo test -p can-hal-rs -p can-hal-isotp --features async`
+   - `cargo test -p can-hal-socketcan -p can-hal-pcan -p can-hal-kvaser`
 4. **Build check** (if touching backend crates):
    - `cargo clippy -p can-hal-pcan -p can-hal-kvaser --all-targets -- -D warnings`
    - `cargo check -p can-hal-socketcan`
