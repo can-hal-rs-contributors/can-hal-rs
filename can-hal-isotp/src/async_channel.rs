@@ -169,8 +169,10 @@ where
         let mut expected_sn: u8 = 1;
         let mut block_count: u16 = 0;
 
+        // N_Cr: restarted by each CF and by a new FF, not by ignored frames.
+        let mut cf_deadline = self.config.tokio_deadline();
         while collected.len() < total_len {
-            let cf_frame = tokio::time::timeout(self.config.timeout, async {
+            let cf_frame = tokio::time::timeout_at(cf_deadline, async {
                 loop {
                     let ts = self.channel.receive().await.map_err(IsoTpError::CanError)?;
 
@@ -207,6 +209,8 @@ where
                     expected_sn = (expected_sn + 1) & 0x0F;
                     block_count += 1;
 
+                    cf_deadline = self.config.tokio_deadline();
+
                     if self.config.block_size > 0
                         && block_count >= u16::from(self.config.block_size)
                         && collected.len() < total_len
@@ -229,6 +233,7 @@ where
                     self.send_fc(FcFlag::ContinueToSend).await?;
                     expected_sn = 1;
                     block_count = 0;
+                    cf_deadline = self.config.tokio_deadline();
                 }
                 // An FC is meant for a sender; a receiver ignores it.
                 IsoTpFrame::FlowControl { .. } => {}

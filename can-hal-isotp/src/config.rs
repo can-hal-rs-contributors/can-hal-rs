@@ -123,4 +123,19 @@ impl IsoTpConfig {
             } => Some(rx_target_address),
         }
     }
+
+    /// When a wait on `timeout` that starts now must end: `now + timeout`, or
+    /// [`FAR_FUTURE`] from now if that overflows, so that a `timeout` of
+    /// `Duration::MAX` waits indefinitely instead of panicking.
+    #[cfg(feature = "async")]
+    pub(crate) fn tokio_deadline(&self) -> tokio::time::Instant {
+        let now = tokio::time::Instant::now();
+        now.checked_add(self.timeout)
+            .unwrap_or_else(|| now + FAR_FUTURE)
+    }
 }
+
+/// How far ahead a deadline goes when `now + timeout` overflows: 30 years,
+/// the cap `tokio::time::timeout` uses.
+#[cfg(feature = "async")]
+const FAR_FUTURE: Duration = Duration::from_secs(86_400 * 365 * 30);

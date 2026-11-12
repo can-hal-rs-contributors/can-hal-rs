@@ -34,6 +34,8 @@ impl std::error::Error for MockError {}
 struct AsyncMockChannel {
     tx_frames: Vec<CanFrame>,
     rx_queue: VecDeque<CanFrame>,
+    /// How long each `receive()` takes to hand out its frame.
+    rx_delay: Duration,
 }
 
 impl AsyncMockChannel {
@@ -41,6 +43,7 @@ impl AsyncMockChannel {
         Self {
             tx_frames: Vec::new(),
             rx_queue: VecDeque::new(),
+            rx_delay: Duration::ZERO,
         }
     }
 }
@@ -69,7 +72,11 @@ impl AsyncReceive for AsyncMockChannel {
             .rx_queue
             .pop_front()
             .expect("rx_queue unexpectedly empty");
-        async move { Ok(Timestamped::new(frame, Instant::now())) }
+        let delay = self.rx_delay;
+        async move {
+            tokio::time::sleep(delay).await;
+            Ok(Timestamped::new(frame, Instant::now()))
+        }
     }
 }
 
@@ -77,6 +84,8 @@ impl AsyncReceive for AsyncMockChannel {
 struct AsyncFdMockChannel {
     tx_frames: Vec<CanFdFrame>,
     rx_queue: VecDeque<Frame>,
+    /// How long each `receive_fd()` takes to hand out its frame.
+    rx_delay: Duration,
 }
 
 impl AsyncFdMockChannel {
@@ -84,6 +93,7 @@ impl AsyncFdMockChannel {
         Self {
             tx_frames: Vec::new(),
             rx_queue: rx.into_iter().collect(),
+            rx_delay: Duration::ZERO,
         }
     }
 }
@@ -112,7 +122,11 @@ impl AsyncReceiveFd for AsyncFdMockChannel {
             .rx_queue
             .pop_front()
             .expect("rx_queue unexpectedly empty");
-        async move { Ok(Timestamped::new(frame, Instant::now())) }
+        let delay = self.rx_delay;
+        async move {
+            tokio::time::sleep(delay).await;
+            Ok(Timestamped::new(frame, Instant::now()))
+        }
     }
 }
 
@@ -441,4 +455,150 @@ async fn test_async_fd_send_honors_reserved_st_min_as_127ms() {
         elapsed >= Duration::from_millis(127),
         "send() took {elapsed:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// N_Cr: restarted by a CF (or a new FF), not by a frame receive() ignores.
+// Every frame below arrives 100 ms after it is asked for, and the timeout is
+// 250 ms. In the first two tests N_Cr starts with the FF at 100 ms and ends
+// at 350 ms, so the FCs on rx_id sent at 200, 300 and 400 ms must not keep
+// it alive for the CF at 500 ms.
+// ---------------------------------------------------------------------------
+
+fn n_cr_config() -> IsoTpConfig {
+    IsoTpConfig {
+        timeout: Duration::from_millis(250),
+        ..default_config()
+    }
+}
+
+#[tokio::test]
+async fn test_async_receive_ignored_frames_do_not_extend_n_cr() {
+    let a: Vec<u8> = (0..13).collect();
+    let mut mock = mock_with([
+        classic_ff(13, &a),
+        fc_cts_frame(),
+        fc_cts_frame(),
+        fc_cts_frame(),
+        classic_cf(1, &a[6..13]),
+    ]);
+    mock.rx_delay = Duration::from_millis(100);
+    let mut isotp = AsyncIsoTpChannel::new(mock, n_cr_config());
+    let result = isotp.receive().await;
+    assert!(
+        matches!(result, Err(IsoTpError::Timeout)),
+        "expected Timeout, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_ignored_frames_do_not_extend_n_cr() {
+    let a: Vec<u8> = (0u8..125).collect();
+    let fc = fd_frame(&[0x30, 0, 0]);
+    let mut mock = AsyncFdMockChannel::new([
+        fd_ff(125, &a),
+        fc.clone(),
+        fc.clone(),
+        fc,
+        fd_cf(1, &a[62..]),
+    ]);
+    mock.rx_delay = Duration::from_millis(100);
+    let mut isotp = AsyncIsoTpFdChannel::new(mock, n_cr_config());
+    let result = isotp.receive().await;
+    assert!(
+        matches!(result, Err(IsoTpError::Timeout)),
+        "expected Timeout, got {result:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_async_receive_ff_restarts_n_cr() {
+    // FF(A) at 100 ms, FC at 200, FF(B) at 300, FC at 400, CF1(B) at 500:
+    // B's FF must move the end of N_Cr from 350 ms to 550 ms.
+    let a: Vec<u8> = (0..20).collect();
+    let b: Vec<u8> = (100..113).collect();
+    let mut mock = mock_with([
+        classic_ff(20, &a),
+        fc_cts_frame(),
+        classic_ff(13, &b),
+        fc_cts_frame(),
+        classic_cf(1, &b[6..13]),
+    ]);
+    mock.rx_delay = Duration::from_millis(100);
+    let mut isotp = AsyncIsoTpChannel::new(mock, n_cr_config());
+    assert_eq!(isotp.receive().await.unwrap(), b);
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_ff_restarts_n_cr() {
+    let a: Vec<u8> = (0u8..200).collect();
+    let b: Vec<u8> = (50u8..175).collect();
+    let fc = fd_frame(&[0x30, 0, 0]);
+    let mut mock = AsyncFdMockChannel::new([
+        fd_ff(200, &a),
+        fc.clone(),
+        fd_ff(125, &b),
+        fc,
+        fd_cf(1, &b[62..]),
+    ]);
+    mock.rx_delay = Duration::from_millis(100);
+    let mut isotp = AsyncIsoTpFdChannel::new(mock, n_cr_config());
+    assert_eq!(isotp.receive().await.unwrap(), b);
+}
+
+// A timeout of Duration::MAX must not overflow the N_Cr deadline;
+// tokio::time::timeout, used for the other waits, caps it instead.
+
+#[tokio::test]
+async fn test_async_receive_with_timeout_duration_max() {
+    let a: Vec<u8> = (0..13).collect();
+    let mock = mock_with([classic_ff(13, &a), classic_cf(1, &a[6..13])]);
+    let cfg = IsoTpConfig {
+        timeout: Duration::MAX,
+        ..default_config()
+    };
+    let mut isotp = AsyncIsoTpChannel::new(mock, cfg);
+    assert_eq!(isotp.receive().await.unwrap(), a);
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_with_timeout_duration_max() {
+    let a: Vec<u8> = (0u8..125).collect();
+    let mock = AsyncFdMockChannel::new([fd_ff(125, &a), fd_cf(1, &a[62..])]);
+    let cfg = IsoTpConfig {
+        timeout: Duration::MAX,
+        ..default_config()
+    };
+    let mut isotp = AsyncIsoTpFdChannel::new(mock, cfg);
+    assert_eq!(isotp.receive().await.unwrap(), a);
+}
+
+#[tokio::test]
+async fn test_async_receive_each_cf_restarts_n_cr() {
+    // FF + 3 CFs at 100 ms intervals: 400 ms in all, but never 250 ms
+    // between two frames.
+    let a: Vec<u8> = (0..27).collect();
+    let mut mock = mock_with([
+        classic_ff(27, &a),
+        classic_cf(1, &a[6..13]),
+        classic_cf(2, &a[13..20]),
+        classic_cf(3, &a[20..27]),
+    ]);
+    mock.rx_delay = Duration::from_millis(100);
+    let mut isotp = AsyncIsoTpChannel::new(mock, n_cr_config());
+    assert_eq!(isotp.receive().await.unwrap(), a);
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_each_cf_restarts_n_cr() {
+    let a: Vec<u8> = (0u8..251).collect();
+    let mut mock = AsyncFdMockChannel::new([
+        fd_ff(251, &a),
+        fd_cf(1, &a[62..125]),
+        fd_cf(2, &a[125..188]),
+        fd_cf(3, &a[188..]),
+    ]);
+    mock.rx_delay = Duration::from_millis(100);
+    let mut isotp = AsyncIsoTpFdChannel::new(mock, n_cr_config());
+    assert_eq!(isotp.receive().await.unwrap(), a);
 }
