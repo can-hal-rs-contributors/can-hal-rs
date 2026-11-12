@@ -74,7 +74,9 @@ impl<'a> IsoTpFrame<'a> {
             }
             // First Frame
             0x1 => {
-                if pci.len() < 2 {
+                // An FF fills its CAN frame, as the Linux kernel requires
+                // (isotp_rcv_ff): 8 bytes, or a CAN FD length from 12 to 64.
+                if !matches!(raw.len(), 8 | 12 | 16 | 20 | 24 | 32 | 48 | 64) || pci.len() < 2 {
                     return Err(IsoTpError::InvalidFrame);
                 }
                 let len12 = (((pci[0] & 0x0F) as usize) << 8) | (pci[1] as usize);

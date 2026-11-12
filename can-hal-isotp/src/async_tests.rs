@@ -779,3 +779,17 @@ async fn test_async_fd_send_with_timeout_duration_max() {
     let payload: Vec<u8> = (0u8..126).collect();
     isotp.send(&payload).await.unwrap();
 }
+
+// ---------------------------------------------------------------------------
+// A First Frame must fill its CAN frame (see tests.rs).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_async_receive_ignores_short_ff() {
+    assert_receive_ignores(&[can_frame(rx_id(), &SHORT_FF)]).await;
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_ignores_short_ff() {
+    assert_fd_receive_ignores(&[fd_frame(&SHORT_FF)]).await;
+}

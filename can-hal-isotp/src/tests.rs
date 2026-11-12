@@ -1197,3 +1197,39 @@ fn test_fd_send_with_timeout_duration_max() {
     let mut ch = IsoTpFdChannel::new(mock, duration_max_config());
     ch.send(&payload).unwrap();
 }
+
+// ---------------------------------------------------------------------------
+// A First Frame must fill its CAN frame, as in the Linux kernel's
+// isotp_rcv_ff: 8 bytes, or a CAN FD length from 12 to 64.
+// ---------------------------------------------------------------------------
+
+/// FF_DL 0 in the 32-bit form, in 6 bytes: nothing carried.
+pub const SHORT_FF: [u8; 6] = [0x10, 0x00, 0x00, 0x00, 0x00, 0x00];
+
+#[test]
+fn test_parse_ff_must_fill_its_frame() {
+    for len in 2..=64 {
+        // FF_DL 4095, more than any FF carries.
+        let mut raw = vec![0xD0u8; len];
+        raw[..2].copy_from_slice(&[0x1F, 0xFF]);
+        let fills = matches!(len, 8 | 12 | 16 | 20 | 24 | 32 | 48 | 64);
+        assert_eq!(parse_ff(&raw, 0).is_some(), fills, "FF of {len} bytes");
+    }
+    assert_eq!(parse_ff(&SHORT_FF, 0), None);
+    // Extended addressing: the TA byte counts toward the frame's length.
+    assert_eq!(parse_ff(&[0xF1, 0x1F, 0xFF, 1, 2, 3, 4], 1), None);
+    assert_eq!(
+        parse_ff(&[0xF1, 0x1F, 0xFF, 1, 2, 3, 4, 5], 1),
+        Some((4095, 5))
+    );
+}
+
+#[test]
+fn test_receive_ignores_short_ff() {
+    assert_receive_ignores(&[make_frame(rx_id(), &SHORT_FF)]);
+}
+
+#[test]
+fn test_fd_receive_ignores_short_ff() {
+    assert_fd_receive_ignores(&[fd_frame(&SHORT_FF)]);
+}
