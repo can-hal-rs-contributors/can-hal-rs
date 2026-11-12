@@ -265,7 +265,7 @@ fn test_isotp_reverse_100_bytes() {
 }
 
 // ---------------------------------------------------------------------------
-// Extended (29-bit) CAN IDs - exercises the is_extended() branches in both
+// Extended (29-bit) CAN IDs - exercises the `CanId::Extended` arms in both
 // backends' convert layers and the EXT message-type flag handling. The
 // existing raw-frame and ISO-TP tests all use standard IDs.
 // ---------------------------------------------------------------------------
@@ -628,9 +628,10 @@ fn test_pcan_extended_filter_blocks_standard() {
 // ---------------------------------------------------------------------------
 // classic_explicit smoke - Kvaser's classic_explicit path skips the solver
 // and goes directly to canSetBusParams with the user-supplied segments. We
-// reproduce the solver's 500K nominal output (tseg1=13, tseg2=6, sjw=4) and
-// verify a PCAN <-> Kvaser frame still rounds-trips, confirming the explicit
-// code path produces a controller configuration compatible with PCAN.
+// use 13/6/4, the 20 TQ, 70% timing the solver picks for 500K on an 80 MHz
+// clock (the U100's), and verify a PCAN <-> Kvaser frame still round-trips,
+// confirming the explicit code path produces a controller configuration
+// compatible with PCAN.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -702,7 +703,7 @@ fn test_kvaser_classic_explicit_round_trip() {
 // ---------------------------------------------------------------------------
 // Drop-and-reopen - verifies that closing a channel (via Drop) properly
 // releases the underlying hardware handle so the same index can be reopened.
-// Regression cover for the finalize_channel cleanup added to PCAN.
+// Regression cover for `PcanChannel`'s `Drop` calling `CAN_Uninitialize`.
 // ---------------------------------------------------------------------------
 
 #[test]

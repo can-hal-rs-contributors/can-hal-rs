@@ -504,8 +504,7 @@ fn test_pcan_fd_drop_and_reopen() {
 #[test]
 fn test_pcan_invalid_channel_index_rejected() {
     let driver = can_hal_pcan::PcanDriver::new().unwrap();
-    // PCAN channel indices are 0..=15; anything larger must be rejected before
-    // the u16 cast rather than silently truncating to channel 0.
+    // PCAN channel indices are 0..=15, so 16 and up must be rejected.
     assert!(
         driver.channel(16).is_err(),
         "PCAN channel index 16 must be rejected"

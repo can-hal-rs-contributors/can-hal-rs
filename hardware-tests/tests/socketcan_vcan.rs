@@ -31,7 +31,8 @@
 //! does this on the Linux runner, with the interface up and the env var set):
 //!
 //! ```bash
-//! CAN_HAL_REQUIRE_VCAN=1 cargo test -p hardware-tests --features vcan
+//! CAN_HAL_REQUIRE_VCAN=1 cargo test -p hardware-tests --features vcan \
+//!   --test socketcan_vcan -- --test-threads=1
 //! ```
 #![cfg(all(target_os = "linux", feature = "vcan"))]
 
@@ -213,7 +214,7 @@ fn test_vcan_fd_loopback_brs_and_dlc() {
     let Some((mut tx, mut rx)) = open_pair() else {
         return;
     };
-    // Spans single-byte lengths and the FD-only DLC steps (12, 20, 48, 64).
+    // Spans lengths classic CAN allows (0, 8) and FD-only ones (12, 20, 48, 64).
     let lengths = [0usize, 8, 12, 20, 48, 64];
     for (i, &len) in lengths.iter().enumerate() {
         // Alternate the bit-rate-switch flag so both states round-trip.
@@ -325,9 +326,10 @@ fn test_vcan_classic_receive_skips_fd_frames() {
 }
 
 // ---------------------------------------------------------------------------
-// Filter behavior. SocketCAN supports multiple independent filters with union
-// semantics, unlike PCAN/Kvaser which collapse to a single ID+mask pair. This
-// is the distinguishing feature worth covering here.
+// Filter behavior. SocketCAN applies each filter exactly (union semantics),
+// unlike PCAN and Kvaser, which keep one acceptance window per frame type
+// widened to cover every filter (an ID range on PCAN, a code+mask on Kvaser).
+// This is the distinguishing feature worth covering here.
 // ---------------------------------------------------------------------------
 
 #[test]
