@@ -10,6 +10,9 @@ pub enum SocketCanError {
     /// Failed to construct a frame (invalid ID, data length, etc.).
     InvalidFrame(String),
     /// The interface index or name is invalid.
+    ///
+    /// Not currently returned: an interface that doesn't exist, or isn't a
+    /// CAN interface, is reported as [`Io`](Self::Io) (`ENODEV`).
     InvalidInterface(String),
 }
 

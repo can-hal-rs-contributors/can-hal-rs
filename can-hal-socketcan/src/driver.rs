@@ -16,6 +16,8 @@ enum InterfaceSpec {
 ///
 /// ```bash
 /// sudo ip link set can0 type can bitrate 500000
+/// # or, for CAN FD:
+/// sudo ip link set can0 type can bitrate 500000 dbitrate 4000000 fd on
 /// sudo ip link set can0 up
 /// ```
 ///
@@ -46,7 +48,10 @@ impl SocketCanDriver {
         }
     }
 
-    /// Begin configuring a channel at the given 0-based interface index.
+    /// Begin configuring a channel on the interface with the given kernel
+    /// interface index (as `ip link` numbers them, from 1). Index 0 binds to
+    /// every CAN interface: the channel receives from all of them but can't
+    /// transmit (`ENXIO`).
     #[must_use]
     pub const fn channel(&self, index: u32) -> SocketCanChannelBuilder {
         SocketCanChannelBuilder {

@@ -2,10 +2,10 @@
 //!
 //! Linux SocketCAN backend for [`can_hal`] traits.
 //!
-//! This crate provides [`SocketCanDriver`] and [`SocketCanChannel`] which
-//! implement the hardware-agnostic CAN traits defined in `can-hal`, enabling
-//! portable CAN application code to run on Linux systems with SocketCAN
-//! interfaces.
+//! This crate provides [`SocketCanDriver`] and [`SocketCanChannel`]; the
+//! channel implements the hardware-agnostic CAN traits defined in `can-hal`,
+//! enabling portable CAN application code to run on Linux systems with
+//! SocketCAN interfaces.
 //!
 //! # Example
 //!
@@ -32,6 +32,8 @@
 //!
 //! ```bash
 //! sudo ip link set can0 type can bitrate 500000
+//! # or, for CAN FD:
+//! sudo ip link set can0 type can bitrate 500000 dbitrate 4000000 fd on
 //! sudo ip link set can0 up
 //! ```
 

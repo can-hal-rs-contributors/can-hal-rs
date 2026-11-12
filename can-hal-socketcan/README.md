@@ -42,8 +42,12 @@ SocketCAN bitrate is configured at the OS level, not through the socket API:
 
 ```bash
 sudo ip link set can0 type can bitrate 500000
+# or, for CAN FD:
+sudo ip link set can0 type can bitrate 500000 dbitrate 4000000 fd on
 sudo ip link set can0 up
 ```
+
+Without `fd on`, `transmit_fd` fails with `EINVAL`.
 
 For testing without hardware, use a virtual CAN interface:
 
