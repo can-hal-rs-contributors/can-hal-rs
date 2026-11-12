@@ -105,6 +105,10 @@ type, widened to cover every filter (an ID range on PCAN, a code+mask on Kvaser)
 several filters can accept IDs no filter names. Code that uses `Filterable` must be aware
 of this.
 
+**Error counters:** Kvaser reads them from CANlib. PCAN-Basic has no parameter for them,
+so on Linux the PCAN backend reads the copy PEAK's driver keeps (`tx_errors` / `rx_errors`
+in sysfs), and on Windows `error_counters()` returns `PcanError::Unsupported`.
+
 ### Builder API per backend
 
 | Backend | Classic | FD | Sample-point setters | Raw escape hatch |
