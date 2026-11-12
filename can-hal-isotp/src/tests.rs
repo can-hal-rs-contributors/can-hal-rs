@@ -9,6 +9,7 @@ use crate::channel::IsoTpChannel;
 use crate::config::{AddressingMode, IsoTpConfig};
 use crate::error::IsoTpError;
 use crate::fd_channel::IsoTpFdChannel;
+use crate::frame::IsoTpFrame;
 use crate::frame::{
     build_cf, build_cf_fd, build_ff, build_ff_fd, build_sf_fd, interpret_st_min, next_fd_dlc,
 };
@@ -938,4 +939,94 @@ fn test_fd_send_fails_on_malformed_fc() {
             "FC {pdu:02X?}: expected InvalidFrame, got {result:?}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// A First Frame whose FF_DL is below the payload it carries itself is
+// ignored. The rule is the Linux kernel's (isotp_rcv_ff): FF_DL must cover
+// the bytes after the FF's PCI, less one in an FD frame longer than 8 bytes.
+// ---------------------------------------------------------------------------
+
+/// The FF_DL and data length `parse` gives `raw`, or `None` if it rejects it.
+fn parse_ff(raw: &[u8], overhead: usize) -> Option<(usize, usize)> {
+    match IsoTpFrame::parse(raw, overhead) {
+        Ok(IsoTpFrame::FirstFrame { total_len, data }) => Some((total_len, data.len())),
+        Ok(other) => panic!("{raw:02X?} parsed as {other:?}"),
+        Err(_) => None,
+    }
+}
+
+#[test]
+fn test_parse_ff_dl_below_ff_payload() {
+    let d = [0xD0u8; 8];
+    let ff = |pci: &[u8]| {
+        let mut f = d;
+        f[..pci.len()].copy_from_slice(pci);
+        f
+    };
+    // 12-bit FF_DL: the FF carries 6 bytes.
+    assert_eq!(parse_ff(&ff(&[0x10, 0x03]), 0), None);
+    assert_eq!(parse_ff(&ff(&[0x10, 0x05]), 0), None);
+    assert_eq!(parse_ff(&ff(&[0x10, 0x06]), 0), Some((6, 6)));
+    assert_eq!(parse_ff(&ff(&[0x10, 0x14]), 0), Some((20, 6)));
+    // 32-bit FF_DL: the FF carries 2 bytes.
+    assert_eq!(parse_ff(&ff(&[0x10, 0, 0, 0, 0, 0]), 0), None);
+    assert_eq!(parse_ff(&ff(&[0x10, 0, 0, 0, 0, 1]), 0), None);
+    assert_eq!(parse_ff(&ff(&[0x10, 0, 0, 0, 0, 2]), 0), Some((2, 2)));
+    // Extended addressing: the FF carries 5 bytes.
+    assert_eq!(parse_ff(&ff(&[0xF1, 0x10, 0x04]), 1), None);
+    assert_eq!(parse_ff(&ff(&[0xF1, 0x10, 0x05]), 1), Some((5, 5)));
+}
+
+#[test]
+fn test_parse_fd_ff_dl_below_ff_payload() {
+    let ff = |len: usize, pci: &[u8]| {
+        let mut f = vec![0xD0u8; len];
+        f[..pci.len()].copy_from_slice(pci);
+        f
+    };
+    // A 64-byte FF carries 62 bytes; FF_DL may be one less, and the data
+    // is then cut to FF_DL.
+    assert_eq!(parse_ff(&ff(64, &[0x10, 60]), 0), None);
+    assert_eq!(parse_ff(&ff(64, &[0x10, 61]), 0), Some((61, 61)));
+    assert_eq!(parse_ff(&ff(64, &[0x10, 62]), 0), Some((62, 62)));
+    assert_eq!(parse_ff(&ff(64, &[0x10, 200]), 0), Some((200, 62)));
+    // A 12-byte FF carries 10.
+    assert_eq!(parse_ff(&ff(12, &[0x10, 8]), 0), None);
+    assert_eq!(parse_ff(&ff(12, &[0x10, 9]), 0), Some((9, 9)));
+    // 32-bit FF_DL in 64 bytes: 58 bytes carried.
+    assert_eq!(parse_ff(&ff(64, &[0x10, 0, 0, 0, 0, 56]), 0), None);
+    assert_eq!(
+        parse_ff(&ff(64, &[0x10, 0, 0, 0, 0, 57]), 0),
+        Some((57, 57))
+    );
+    // Extended addressing in 64 bytes: 61 bytes carried.
+    assert_eq!(parse_ff(&ff(64, &[0xF1, 0x10, 59]), 1), None);
+    assert_eq!(parse_ff(&ff(64, &[0xF1, 0x10, 60]), 1), Some((60, 60)));
+    // An 8-byte FD frame follows the classic rule.
+    assert_eq!(parse_ff(&ff(8, &[0x10, 0x05]), 0), None);
+    assert_eq!(parse_ff(&ff(8, &[0x10, 0x06]), 0), Some((6, 6)));
+}
+
+#[test]
+fn test_receive_ignores_ff_dl_below_ff_payload() {
+    // [10 03 01 02 03 04 05 06]: FF_DL 3, six bytes carried.
+    assert_receive_ignores(&[classic_ff(3, &[1, 2, 3, 4, 5, 6])]);
+}
+
+#[test]
+fn test_fd_receive_ignores_ff_dl_below_ff_payload() {
+    let carried: Vec<u8> = (0u8..62).collect();
+    assert_fd_receive_ignores(&[fd_ff(60, &carried)]);
+}
+
+#[test]
+fn test_fd_receive_cuts_ff_payload_to_ff_dl() {
+    // FF_DL 61 in a 64-byte FF that carries 62 bytes.
+    let carried: Vec<u8> = (0u8..62).collect();
+    let mut ch = IsoTpFdChannel::new(
+        FdMockChannel::new(vec![fd_ff(61, &carried)]),
+        default_config(),
+    );
+    assert_eq!(ch.receive().unwrap(), carried[..61]);
 }

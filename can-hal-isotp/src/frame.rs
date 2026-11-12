@@ -22,7 +22,9 @@ pub enum IsoTpFrame<'a> {
         data: &'a [u8],
     },
     FirstFrame {
+        /// FF_DL: the length of the whole message.
         total_len: usize,
+        /// The message bytes this FF carries, never more than `total_len`.
         data: &'a [u8],
     },
     ConsecutiveFrame {
@@ -78,7 +80,7 @@ impl<'a> IsoTpFrame<'a> {
                     return Err(IsoTpError::InvalidFrame);
                 }
                 let len12 = (((pci[0] & 0x0F) as usize) << 8) | (pci[1] as usize);
-                if len12 == 0 {
+                let (total_len, pci_len) = if len12 == 0 {
                     // Long FF: 32-bit length in bytes 2..6
                     if pci.len() < 6 {
                         return Err(IsoTpError::InvalidFrame);
@@ -87,25 +89,23 @@ impl<'a> IsoTpFrame<'a> {
                         | ((pci[3] as usize) << 16)
                         | ((pci[4] as usize) << 8)
                         | (pci[5] as usize);
-                    let data_start = overhead + 6;
-                    let data = if data_start < raw.len() {
-                        &raw[data_start..]
-                    } else {
-                        &[]
-                    };
-                    Ok(IsoTpFrame::FirstFrame { total_len, data })
+                    (total_len, 6)
                 } else {
-                    let data_start = overhead + 2;
-                    let data = if data_start < raw.len() {
-                        &raw[data_start..]
-                    } else {
-                        &[]
-                    };
-                    Ok(IsoTpFrame::FirstFrame {
-                        total_len: len12,
-                        data,
-                    })
+                    (len12, 2)
+                };
+                let data = &pci[pci_len..];
+                // FF_DL must cover the bytes this FF carries; an FD frame
+                // longer than 8 bytes may carry one more (the Linux kernel's
+                // allowance for the SF_DL escape byte, isotp_rcv_ff), which
+                // is padding, so cut the data to FF_DL.
+                let slack = usize::from(raw.len() > 8);
+                if total_len < data.len().saturating_sub(slack) {
+                    return Err(IsoTpError::InvalidFrame);
                 }
+                Ok(IsoTpFrame::FirstFrame {
+                    total_len,
+                    data: &data[..data.len().min(total_len)],
+                })
             }
             // Consecutive Frame
             0x2 => {

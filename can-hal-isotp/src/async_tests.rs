@@ -733,3 +733,27 @@ async fn test_async_fd_send_fails_on_malformed_fc() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// A First Frame whose FF_DL is below the payload it carries itself is
+// ignored (see tests.rs).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_async_receive_ignores_ff_dl_below_ff_payload() {
+    assert_receive_ignores(&[classic_ff(3, &[1, 2, 3, 4, 5, 6])]).await;
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_ignores_ff_dl_below_ff_payload() {
+    let carried: Vec<u8> = (0u8..62).collect();
+    assert_fd_receive_ignores(&[fd_ff(60, &carried)]).await;
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_cuts_ff_payload_to_ff_dl() {
+    let carried: Vec<u8> = (0u8..62).collect();
+    let mock = AsyncFdMockChannel::new([fd_ff(61, &carried)]);
+    let mut isotp = AsyncIsoTpFdChannel::new(mock, default_config());
+    assert_eq!(isotp.receive().await.unwrap(), carried[..61]);
+}
