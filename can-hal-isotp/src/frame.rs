@@ -2,6 +2,11 @@ use std::time::Duration;
 
 use crate::error::IsoTpError;
 
+/// Most bytes `receive()` reserves up front for a message: the largest FF_DL
+/// of the 12-bit form. FF_DL comes from the peer and can be up to `u32::MAX`
+/// with the 32-bit form, so a longer message grows as its CFs arrive instead.
+pub(crate) const MAX_RX_PREALLOC: usize = 0xFFF;
+
 /// Flow Control flag values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FcFlag {

@@ -6,7 +6,7 @@ use can_hal::frame::CanFrame;
 
 use crate::config::{AddressingMode, IsoTpConfig};
 use crate::error::IsoTpError;
-use crate::frame::{self, interpret_st_min, FcFlag, IsoTpFrame};
+use crate::frame::{self, interpret_st_min, FcFlag, IsoTpFrame, MAX_RX_PREALLOC};
 
 /// Synchronous ISO-TP transport channel wrapping a `can-hal` CAN channel.
 pub struct IsoTpChannel<C> {
@@ -166,7 +166,7 @@ where
                     return Ok(data.to_vec());
                 }
                 IsoTpFrame::FirstFrame { total_len, data } => {
-                    let mut result = Vec::with_capacity(total_len);
+                    let mut result = Vec::with_capacity(total_len.min(MAX_RX_PREALLOC));
                     result.extend_from_slice(data);
 
                     // Send FC(CTS)
