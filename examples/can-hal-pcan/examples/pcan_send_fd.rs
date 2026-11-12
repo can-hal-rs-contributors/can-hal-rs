@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match channel.transmit_fd(&frame) {
             Ok(()) => {
                 println!(
-                    "TX: ID=0x{:03X} DLC={} BRS={} data=[{} ...]",
+                    "TX: ID=0x{:03X} len={} BRS={} data=[{} ...]",
                     frame.id().raw(),
                     frame.len(),
                     frame.brs(),

@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match timestamped.frame() {
                     Frame::Fd(fd) => {
                         println!(
-                            "RX FD: ID=0x{:03X} DLC={} BRS={} ESI={} data=[{}] ({elapsed:.1?} ago)",
+                            "RX FD: ID=0x{:03X} len={} BRS={} ESI={} data=[{}] ({elapsed:.1?} ago)",
                             fd.id().raw(),
                             fd.len(),
                             fd.brs(),
@@ -56,16 +56,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
                     Frame::Can(classic) => {
+                        let payload = if classic.is_remote_frame() {
+                            "RTR".to_string()
+                        } else {
+                            format!(
+                                "data=[{}]",
+                                classic
+                                    .data()
+                                    .iter()
+                                    .map(|b| format!("{b:02X}"))
+                                    .collect::<Vec<_>>()
+                                    .join(" ")
+                            )
+                        };
                         println!(
-                            "RX classic: ID=0x{:03X} DLC={} data=[{}] ({elapsed:.1?} ago)",
+                            "RX classic: ID=0x{:03X} DLC={} {payload} ({elapsed:.1?} ago)",
                             classic.id().raw(),
-                            classic.len(),
-                            classic
-                                .data()
-                                .iter()
-                                .map(|b| format!("{b:02X}"))
-                                .collect::<Vec<_>>()
-                                .join(" "),
+                            classic.dlc(),
                         );
                     }
                 }

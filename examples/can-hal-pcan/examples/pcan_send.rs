@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!(
                     "TX: ID=0x{:03X} DLC={} data=[{}]",
                     frame.id().raw(),
-                    frame.len(),
+                    frame.dlc(),
                     frame
                         .data()
                         .iter()
