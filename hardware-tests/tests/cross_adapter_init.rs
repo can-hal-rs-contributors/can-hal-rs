@@ -303,6 +303,18 @@ fn test_kvaser_fd_standard_filter_blocks_extended() {
     assert_eq!(received, [std_id], "a standard filter passed {received:?}");
 }
 
+#[test]
+fn test_pcan_fd_extended_filter_blocks_standard() {
+    let ext_id = CanId::new_extended(0x100).unwrap();
+    let mut pcan = open_pcan_fd();
+    pcan.set_filters(&[Filter::new(ext_id, 0x1FFF_FFFF)])
+        .expect("set_filters failed");
+    let mut kvaser = open_kvaser_fd();
+    send_all_fd(&mut kvaser, &[CanId::new_standard(0x100).unwrap(), ext_id]);
+    let received = try_receive_all_fd(&mut pcan);
+    assert_eq!(received, [ext_id], "an extended filter passed {received:?}");
+}
+
 // ---------------------------------------------------------------------------
 // Extended (29-bit) IDs in FD mode (the existing extended-ID tests are classic).
 // ---------------------------------------------------------------------------

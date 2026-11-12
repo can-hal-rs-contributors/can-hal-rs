@@ -585,6 +585,46 @@ fn test_kvaser_extended_filter_blocks_standard() {
     assert_eq!(received, [ext_id], "an extended filter passed {received:?}");
 }
 
+#[test]
+fn test_pcan_standard_filter_blocks_extended() {
+    let std_id = CanId::new_standard(0x200).unwrap();
+    let mut pcan = open_pcan_classic();
+    pcan.set_filters(&[Filter::new(std_id, 0x7FF)])
+        .expect("set_filters failed");
+    let mut kvaser = open_kvaser_classic();
+    send_all(
+        &mut kvaser,
+        &[
+            CanId::new_extended(0x200).unwrap(),
+            // 0x200 in the top 11 bits, where a filter shared by both
+            // types would compare a standard ID.
+            CanId::new_extended(0x200 << 18).unwrap(),
+            std_id,
+        ],
+    );
+    let received = try_receive_all(&mut pcan);
+    assert_eq!(received, [std_id], "a standard filter passed {received:?}");
+}
+
+#[test]
+fn test_pcan_extended_filter_blocks_standard() {
+    let ext_id = CanId::new_extended(0x100).unwrap();
+    let mut pcan = open_pcan_classic();
+    pcan.set_filters(&[Filter::new(ext_id, 0x1FFF_FFFF)])
+        .expect("set_filters failed");
+    let mut kvaser = open_kvaser_classic();
+    send_all(
+        &mut kvaser,
+        &[
+            CanId::new_standard(0x100).unwrap(),
+            CanId::new_standard(0x7FF).unwrap(),
+            ext_id,
+        ],
+    );
+    let received = try_receive_all(&mut pcan);
+    assert_eq!(received, [ext_id], "an extended filter passed {received:?}");
+}
+
 // ---------------------------------------------------------------------------
 // classic_explicit smoke - Kvaser's classic_explicit path skips the solver
 // and goes directly to canSetBusParams with the user-supplied segments. We

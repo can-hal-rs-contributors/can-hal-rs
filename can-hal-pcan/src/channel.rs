@@ -15,6 +15,7 @@ use can_hal::bus::{BusState, BusStatus, ErrorCounters};
 use can_hal::channel::{Receive, ReceiveFd, Transmit, TransmitFd};
 use can_hal::filter::{Filter, Filterable};
 use can_hal::frame::{CanFdFrame, CanFrame, Frame, Timestamped};
+use can_hal::id::CanId;
 
 use crate::convert;
 use crate::error::{check_status, PcanError, PcanStatus};
@@ -37,7 +38,28 @@ pub struct PcanChannel<Mode> {
     lib: Arc<PcanLibrary>,
     handle: u16,
     event: ReceiveEvent,
+    /// The ID ranges `set_filters` opened, or `None` while the channel
+    /// accepts every frame.
+    filter: Option<IdRanges>,
     _mode: PhantomData<Mode>,
+}
+
+/// The ID range a filter set opened for each frame type, `None` for a type
+/// with no filter.
+#[derive(Debug, Clone, Copy)]
+struct IdRanges {
+    standard: Option<(u32, u32)>,
+    extended: Option<(u32, u32)>,
+}
+
+impl IdRanges {
+    fn accepts(&self, id: CanId) -> bool {
+        let (range, raw) = match id {
+            CanId::Standard(v) => (self.standard, u32::from(v)),
+            CanId::Extended(v) => (self.extended, v),
+        };
+        range.is_some_and(|(from, to)| (from..=to).contains(&raw))
+    }
 }
 
 impl<Mode> PcanChannel<Mode> {
@@ -48,15 +70,21 @@ impl<Mode> PcanChannel<Mode> {
             lib,
             handle,
             event,
+            filter: None,
             _mode: PhantomData,
         }
+    }
+
+    /// Whether the filter set accepts a frame with this ID.
+    fn accepts(&self, id: CanId) -> bool {
+        self.filter.map_or(true, |ranges| ranges.accepts(id))
     }
 }
 
 impl PcanChannel<Classic> {
     /// Try to read a classic CAN frame from the receive queue. Returns
-    /// `Ok(None)` if the queue is empty. Status messages and error frames
-    /// are skipped.
+    /// `Ok(None)` if the queue is empty. Status messages, error frames, and
+    /// frames the filter set rejects, are skipped.
     fn read_classic(&self) -> Result<Option<CanFrame>, PcanError> {
         loop {
             let mut msg = ffi::TPCANMsg {
@@ -77,7 +105,7 @@ impl PcanChannel<Classic> {
                 return Ok(None);
             }
             check_status(status)?;
-            if let Some(frame) = convert::from_pcan_msg(&msg)? {
+            if let Some(frame) = convert::from_pcan_msg(&msg)?.filter(|f| self.accepts(f.id())) {
                 return Ok(Some(frame));
             }
         }
@@ -86,8 +114,8 @@ impl PcanChannel<Classic> {
 
 impl PcanChannel<Fd> {
     /// Try to read any frame (classic or FD) via `CAN_ReadFD`. Returns
-    /// `Ok(None)` if the queue is empty. Status messages and error frames
-    /// are skipped.
+    /// `Ok(None)` if the queue is empty. Status messages, error frames, and
+    /// frames the filter set rejects, are skipped.
     fn read_fd(&self) -> Result<Option<Frame>, PcanError> {
         loop {
             let mut msg = ffi::TPCANMsgFD {
@@ -104,7 +132,7 @@ impl PcanChannel<Fd> {
                 return Ok(None);
             }
             check_status(status)?;
-            if let Some(frame) = convert::from_pcan_msg_fd(&msg)? {
+            if let Some(frame) = convert::from_pcan_msg_fd(&msg)?.filter(|f| self.accepts(f.id())) {
                 return Ok(Some(frame));
             }
         }
@@ -261,6 +289,11 @@ impl<Mode> Filterable for PcanChannel<Mode> {
     /// actually narrow we first switch the channel's `PCAN_MESSAGE_FILTER`
     /// state to `CLOSE` (reject all), then call `CAN_FilterMessages` to open
     /// the requested ranges.
+    ///
+    /// The hardware filter can pass frames of the other type: an extended
+    /// range passes the standard IDs inside it, and on Windows the two types
+    /// share one filter. So the receive methods also drop frames outside the
+    /// range opened for their type.
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), Self::Error> {
         if filters.is_empty() {
             return self.clear_filters();
@@ -304,7 +337,12 @@ impl<Mode> Filterable for PcanChannel<Mode> {
             Ok(())
         })();
 
-        if apply.is_err() {
+        if apply.is_ok() {
+            self.filter = Some(IdRanges {
+                standard: std_min.zip(std_max),
+                extended: ext_min.zip(ext_max),
+            });
+        } else {
             // Best-effort: leave filters in accept-all rather than a
             // half-merged state. Ignore secondary cleanup failure.
             #[allow(clippy::let_underscore_must_use)]
@@ -314,6 +352,7 @@ impl<Mode> Filterable for PcanChannel<Mode> {
     }
 
     fn clear_filters(&mut self) -> Result<(), Self::Error> {
+        self.filter = None;
         // Switch PCAN_MESSAGE_FILTER to OPEN to accept all frames regardless
         // of frame type. Using SetValue avoids the expand-only semantics of
         // CAN_FilterMessages.
@@ -457,7 +496,6 @@ const fn bus_state_from_status(status: u32) -> Result<BusState, PcanError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use can_hal::id::CanId;
 
     #[test]
     fn bus_state_from_bus_flags() {
@@ -508,6 +546,26 @@ mod tests {
                 bus_state_from_status(status)
             );
         }
+    }
+
+    #[test]
+    fn id_ranges_keep_each_type_to_its_own_range() {
+        let ranges = IdRanges {
+            standard: None,
+            extended: Some((0x100, 0x1FF)),
+        };
+        assert!(ranges.accepts(CanId::new_extended(0x100).unwrap()));
+        assert!(ranges.accepts(CanId::new_extended(0x1FF).unwrap()));
+        assert!(!ranges.accepts(CanId::new_extended(0x200).unwrap()));
+        assert!(!ranges.accepts(CanId::new_standard(0x100).unwrap()));
+
+        let ranges = IdRanges {
+            standard: Some((0x200, 0x200)),
+            extended: None,
+        };
+        assert!(ranges.accepts(CanId::new_standard(0x200).unwrap()));
+        assert!(!ranges.accepts(CanId::new_standard(0x201).unwrap()));
+        assert!(!ranges.accepts(CanId::new_extended(0x200).unwrap()));
     }
 
     #[test]
