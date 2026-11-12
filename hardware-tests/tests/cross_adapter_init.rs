@@ -144,9 +144,16 @@ fn test_pcan_bus_status_fd() {
         .connect()
         .unwrap();
     assert_eq!(ch.bus_state().expect("bus_state"), BusState::ErrorActive);
-    let counters = ch.error_counters().expect("error_counters");
-    assert_eq!(counters.transmit, 0);
-    assert_eq!(counters.receive, 0);
+    // PCAN-Basic has no parameter for the error counters, so error_counters()
+    // is unsupported on Windows.
+    let counters = ch.error_counters();
+    if cfg!(windows) {
+        assert!(counters.is_err(), "expected Unsupported, got {counters:?}");
+    } else {
+        let counters = counters.expect("error_counters");
+        assert_eq!(counters.transmit, 0);
+        assert_eq!(counters.receive, 0);
+    }
 }
 
 #[test]

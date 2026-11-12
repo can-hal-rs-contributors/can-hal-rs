@@ -146,6 +146,13 @@ impl ReceiveEvent {
         Ok(Self { lib, handle, fd })
     }
 
+    /// The channel's file descriptor: on Linux, PCAN-Basic's receive event
+    /// is the descriptor of the driver's character device for the channel.
+    #[cfg(target_os = "linux")]
+    pub(crate) const fn fd(&self) -> i32 {
+        self.fd
+    }
+
     #[cfg(not(target_os = "windows"))]
     fn wait_unix(&self, timeout: Option<Duration>) -> Result<bool, PcanError> {
         // i32::MAX as u128 is always lossless; the final `as i32` is bounded by .min().

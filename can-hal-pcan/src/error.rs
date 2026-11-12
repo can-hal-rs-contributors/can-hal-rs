@@ -73,6 +73,8 @@ pub enum PcanError {
     UnsupportedTiming(String),
     /// A platform-specific error (e.g., event creation failed).
     Platform(String),
+    /// The operation isn't available on this platform or device.
+    Unsupported(&'static str),
 }
 
 impl fmt::Display for PcanError {
@@ -85,6 +87,7 @@ impl fmt::Display for PcanError {
             Self::UnsupportedBitrate(br) => write!(f, "unsupported bitrate {br} bps"),
             Self::UnsupportedTiming(msg) => write!(f, "unsupported FD timing: {msg}"),
             Self::Platform(msg) => write!(f, "platform error: {msg}"),
+            Self::Unsupported(msg) => write!(f, "unsupported: {msg}"),
         }
     }
 }

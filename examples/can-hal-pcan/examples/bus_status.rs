@@ -39,7 +39,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         let state = channel.bus_state()?;
-        let counters = channel.error_counters()?;
+        // error_counters() is unsupported on Windows.
+        let counters = match channel.error_counters() {
+            Ok(c) => format!("TX errors: {}  |  RX errors: {}", c.transmit, c.receive),
+            Err(e) => format!("error counters: {e}"),
+        };
 
         let state_str = match state {
             BusState::ErrorActive => "Error Active (normal)",
@@ -47,10 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             BusState::BusOff => "Bus Off",
         };
 
-        println!(
-            "Bus: {state_str}  |  TX errors: {}  |  RX errors: {}",
-            counters.transmit, counters.receive,
-        );
+        println!("Bus: {state_str}  |  {counters}");
 
         thread::sleep(Duration::from_secs(1));
     }

@@ -33,11 +33,16 @@ fn test_pcan_bus_status() {
         "Expected ErrorActive bus state"
     );
 
-    let counters = channel
-        .error_counters()
-        .expect("Failed to read error counters");
-    assert_eq!(counters.transmit, 0, "Expected 0 TX errors");
-    assert_eq!(counters.receive, 0, "Expected 0 RX errors");
+    // PCAN-Basic has no parameter for the error counters, so error_counters()
+    // is unsupported on Windows.
+    let counters = channel.error_counters();
+    if cfg!(windows) {
+        assert!(counters.is_err(), "Expected Unsupported, got {counters:?}");
+    } else {
+        let counters = counters.expect("Failed to read error counters");
+        assert_eq!(counters.transmit, 0, "Expected 0 TX errors");
+        assert_eq!(counters.receive, 0, "Expected 0 RX errors");
+    }
 }
 
 #[test]

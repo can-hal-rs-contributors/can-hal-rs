@@ -118,8 +118,6 @@ pub const PCAN_RECEIVE_EVENT: u8 = 0x03;
 pub const PCAN_MESSAGE_FILTER: u8 = 0x04;
 pub const PCAN_BUSOFF_AUTORESET: u8 = 0x07;
 pub const PCAN_LISTEN_ONLY: u8 = 0x08;
-pub const PCAN_BUSERROR_READ: u8 = 0x24;
-pub const PCAN_BUSERROR_WRITE: u8 = 0x25;
 
 // Values for PCAN_MESSAGE_FILTER.
 pub const PCAN_FILTER_CLOSE: u32 = 0;

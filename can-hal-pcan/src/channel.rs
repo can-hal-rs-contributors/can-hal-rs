@@ -360,47 +360,59 @@ impl<Mode> BusStatus for PcanChannel<Mode> {
         bus_state_from_status(status)
     }
 
+    /// Read the transmit and receive error counters.
+    ///
+    /// PCAN-Basic has no parameter for them. On Linux they're read from the
+    /// `tx_errors` / `rx_errors` attributes that PEAK's driver keeps in sysfs
+    /// for the channel's device; a device that doesn't track them returns
+    /// [`PcanError::Unsupported`]. The driver updates its copy when the
+    /// device reports a bus error, so after the bus recovers it can read
+    /// higher than the controller's own counters. On Windows this always
+    /// returns [`PcanError::Unsupported`].
     fn error_counters(&self) -> Result<ErrorCounters, Self::Error> {
-        // PCAN-Basic's support for individual TX/RX error counters varies by
-        // hardware. Attempt to read them; fall back to 0 if unsupported.
-        let mut rx_errors: u32 = 0;
-        #[allow(clippy::cast_possible_truncation)] // size_of::<u32>() == 4, fits in u32
-        // SAFETY: get_value() was loaded from PCANBasic and self.handle is valid.
-        // rx_errors points to a valid stack-allocated u32 with correct buffer length.
-        let status_rx = unsafe {
-            (self.lib.get_value)(
-                self.handle,
-                ffi::PCAN_BUSERROR_READ,
-                std::ptr::from_mut(&mut rx_errors).cast::<std::ffi::c_void>(),
-                std::mem::size_of::<u32>() as u32,
-            )
-        };
+        #[cfg(target_os = "linux")]
+        {
+            sysfs_error_counters(self.event.fd())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Err(PcanError::Unsupported(
+                "PCAN-Basic has no parameter for the error counters",
+            ))
+        }
+    }
+}
 
-        let mut tx_errors: u32 = 0;
-        #[allow(clippy::cast_possible_truncation)] // size_of::<u32>() == 4, fits in u32
-        // SAFETY: get_value() was loaded from PCANBasic and self.handle is valid.
-        // tx_errors points to a valid stack-allocated u32 with correct buffer length.
-        let status_tx = unsafe {
-            (self.lib.get_value)(
-                self.handle,
-                ffi::PCAN_BUSERROR_WRITE,
-                std::ptr::from_mut(&mut tx_errors).cast::<std::ffi::c_void>(),
-                std::mem::size_of::<u32>() as u32,
-            )
-        };
+/// Read the error counters of the PEAK driver's device behind `fd` from
+/// `/sys/dev/char/<major>:<minor>/{tx,rx}_errors`.
+#[cfg(target_os = "linux")]
+fn sysfs_error_counters(fd: i32) -> Result<ErrorCounters, PcanError> {
+    const UNSUPPORTED: PcanError =
+        PcanError::Unsupported("the PCAN driver doesn't report error counters for this device");
 
-        Ok(ErrorCounters {
-            receive: if status_rx == ffi::PCAN_ERROR_OK {
-                rx_errors.min(255) as u8
-            } else {
-                0
-            },
-            transmit: if status_tx == ffi::PCAN_ERROR_OK {
-                tx_errors.min(255) as u8
-            } else {
-                0
-            },
-        })
+    // SAFETY: libc::stat is a plain C struct, for which all zero bytes is a
+    // valid value.
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: fstat() is given a descriptor the channel owns and a pointer
+    // to a stat struct for it to fill.
+    if unsafe { libc::fstat(fd, &mut st) } != 0 {
+        return Err(UNSUPPORTED);
+    }
+    let dir = format!(
+        "/sys/dev/char/{}:{}",
+        libc::major(st.st_rdev),
+        libc::minor(st.st_rdev)
+    );
+    let read = |name: &str| -> Option<u8> {
+        let text = std::fs::read_to_string(format!("{dir}/{name}")).ok()?;
+        let value: u32 = text.trim().parse().ok()?;
+        // A receive counter can pass 255; the trait's counters are u8.
+        #[allow(clippy::cast_possible_truncation)] // clamped to 255 first
+        Some(value.min(255) as u8)
+    };
+    match (read("tx_errors"), read("rx_errors")) {
+        (Some(transmit), Some(receive)) => Ok(ErrorCounters { transmit, receive }),
+        _ => Err(UNSUPPORTED),
     }
 }
 

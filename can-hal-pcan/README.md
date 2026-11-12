@@ -16,6 +16,8 @@
 
 Implements `Transmit`, `Receive`, `TransmitFd`, `ReceiveFd`, `Filterable`, and `BusStatus` using the PCAN-Basic API from Peak System. The channel builder uses typestate so that classic vs FD paths are tracked at compile time and invalid combinations are compile errors.
 
+PCAN-Basic has no parameter for the error counters. On Linux, `error_counters()` reads the copy PEAK's driver keeps in sysfs; on Windows it returns `PcanError::Unsupported`.
+
 Supports USB, PCI, and LAN PCAN interfaces on Windows and Linux.
 
 ## Usage
