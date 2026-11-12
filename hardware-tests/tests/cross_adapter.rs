@@ -530,6 +530,20 @@ fn send_all<T: Transmit>(tx: &mut T, ids: &[CanId]) {
     thread::sleep(Duration::from_millis(200));
 }
 
+// PCAN-Basic can queue a status message ahead of the frames; try_receive
+// must skip it and return the frame behind it, not report an empty queue.
+// A guard: libpcanbasic drops the status message that follows
+// CAN_Initialize, so a classic channel's queue doesn't start with one.
+#[test]
+fn test_pcan_try_receive_skips_status_messages() {
+    let id = CanId::new_standard(0x123).unwrap();
+    let mut pcan = open_pcan_classic();
+    let mut kvaser = open_kvaser_classic();
+    send_all(&mut kvaser, &[id]);
+    let received = try_receive_all(&mut pcan);
+    assert_eq!(received, [id], "try_receive returned {received:?}");
+}
+
 #[test]
 fn test_kvaser_standard_filter_blocks_extended() {
     let std_id = CanId::new_standard(0x200).unwrap();

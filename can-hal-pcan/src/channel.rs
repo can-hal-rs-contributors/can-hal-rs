@@ -55,50 +55,59 @@ impl<Mode> PcanChannel<Mode> {
 
 impl PcanChannel<Classic> {
     /// Try to read a classic CAN frame from the receive queue. Returns
-    /// `Ok(None)` if the queue is empty or the frame was skipped (RTR,
-    /// status).
+    /// `Ok(None)` if the queue is empty. Status messages and error frames
+    /// are skipped.
     fn read_classic(&self) -> Result<Option<CanFrame>, PcanError> {
-        let mut msg = ffi::TPCANMsg {
-            id: 0,
-            msg_type: 0,
-            len: 0,
-            data: [0; 8],
-        };
-        let mut ts = ffi::TPCANTimestamp {
-            millis: 0,
-            millis_overflow: 0,
-            micros: 0,
-        };
-        // SAFETY: read() was loaded from PCANBasic and self.handle is valid from a successful CAN_Initialize.
-        // msg and ts point to valid stack-allocated TPCANMsg and TPCANTimestamp.
-        let status = unsafe { (self.lib.read)(self.handle, &mut msg, &mut ts) };
-        if status == ffi::PCAN_ERROR_QRCVEMPTY {
-            return Ok(None);
+        loop {
+            let mut msg = ffi::TPCANMsg {
+                id: 0,
+                msg_type: 0,
+                len: 0,
+                data: [0; 8],
+            };
+            let mut ts = ffi::TPCANTimestamp {
+                millis: 0,
+                millis_overflow: 0,
+                micros: 0,
+            };
+            // SAFETY: read() was loaded from PCANBasic and self.handle is valid from a successful CAN_Initialize.
+            // msg and ts point to valid stack-allocated TPCANMsg and TPCANTimestamp.
+            let status = unsafe { (self.lib.read)(self.handle, &mut msg, &mut ts) };
+            if status == ffi::PCAN_ERROR_QRCVEMPTY {
+                return Ok(None);
+            }
+            check_status(status)?;
+            if let Some(frame) = convert::from_pcan_msg(&msg)? {
+                return Ok(Some(frame));
+            }
         }
-        check_status(status)?;
-        convert::from_pcan_msg(&msg)
     }
 }
 
 impl PcanChannel<Fd> {
     /// Try to read any frame (classic or FD) via `CAN_ReadFD`. Returns
-    /// `Ok(None)` if the queue is empty or the frame was skipped.
+    /// `Ok(None)` if the queue is empty. Status messages and error frames
+    /// are skipped.
     fn read_fd(&self) -> Result<Option<Frame>, PcanError> {
-        let mut msg = ffi::TPCANMsgFD {
-            id: 0,
-            msg_type: 0,
-            dlc: 0,
-            data: [0; 64],
-        };
-        let mut ts: u64 = 0;
-        // SAFETY: read_fd() was loaded from PCANBasic and self.handle is valid from a successful CAN_InitializeFD.
-        // msg and ts point to valid stack-allocated TPCANMsgFD and u64.
-        let status = unsafe { (self.lib.read_fd)(self.handle, &mut msg, &mut ts) };
-        if status == ffi::PCAN_ERROR_QRCVEMPTY {
-            return Ok(None);
+        loop {
+            let mut msg = ffi::TPCANMsgFD {
+                id: 0,
+                msg_type: 0,
+                dlc: 0,
+                data: [0; 64],
+            };
+            let mut ts: u64 = 0;
+            // SAFETY: read_fd() was loaded from PCANBasic and self.handle is valid from a successful CAN_InitializeFD.
+            // msg and ts point to valid stack-allocated TPCANMsgFD and u64.
+            let status = unsafe { (self.lib.read_fd)(self.handle, &mut msg, &mut ts) };
+            if status == ffi::PCAN_ERROR_QRCVEMPTY {
+                return Ok(None);
+            }
+            check_status(status)?;
+            if let Some(frame) = convert::from_pcan_msg_fd(&msg)? {
+                return Ok(Some(frame));
+            }
         }
-        check_status(status)?;
-        convert::from_pcan_msg_fd(&msg)
     }
 }
 

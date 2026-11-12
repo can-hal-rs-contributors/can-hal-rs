@@ -271,6 +271,18 @@ fn send_all_fd<T: TransmitFd>(tx: &mut T, ids: &[CanId]) {
     thread::sleep(Duration::from_millis(200));
 }
 
+// PCAN-Basic can queue a status message ahead of the frames; try_receive_fd
+// must skip it and return the frame behind it, not report an empty queue.
+#[test]
+fn test_pcan_fd_try_receive_skips_status_messages() {
+    let id = CanId::new_standard(0x123).unwrap();
+    let mut pcan = open_pcan_fd();
+    let mut kvaser = open_kvaser_fd();
+    send_all_fd(&mut kvaser, &[id]);
+    let received = try_receive_all_fd(&mut pcan);
+    assert_eq!(received, [id], "try_receive_fd returned {received:?}");
+}
+
 #[test]
 fn test_kvaser_fd_standard_filter_blocks_extended() {
     let std_id = CanId::new_standard(0x200).unwrap();
