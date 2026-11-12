@@ -13,7 +13,7 @@ workspace = true
 # (tests/socketcan_vcan.rs). Off by default so a local `cargo test` neither
 # pulls in the SocketCAN backend nor needs a vcan interface (and the sudo to
 # create one). CI turns it on with `--features vcan` on the Linux runner.
-vcan = ["dep:can-hal-socketcan"]
+vcan = ["dep:can-hal-socketcan", "dep:socketcan"]
 # Compiles and runs the Kvaser CANlib virtual-channel tests
 # (tests/kvaser_virtual.rs). Off by default: they need CANlib and its virtual
 # driver installed.
@@ -29,3 +29,5 @@ can-hal-isotp = { path = "../can-hal-isotp" }
 # and pulled in only when the `vcan` feature is enabled.
 [target.'cfg(target_os = "linux")'.dependencies]
 can-hal-socketcan = { path = "../can-hal-socketcan", optional = true }
+# Writes frames can-hal cannot build (an FD frame of 9 bytes) in the vcan tests.
+socketcan = { version = "3.5", optional = true }

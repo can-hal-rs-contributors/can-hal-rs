@@ -39,9 +39,9 @@ use std::time::{Duration, Instant};
 
 use can_hal::channel::{Receive, ReceiveFd, Transmit, TransmitFd};
 use can_hal::filter::{Filter, Filterable};
-use can_hal::frame::{CanFdFrame, CanFrame, Frame};
+use can_hal::frame::{CanFdFrame, CanFrame, Frame, Timestamped};
 use can_hal::CanId;
-use can_hal_socketcan::{SocketCanChannel, SocketCanDriver};
+use can_hal_socketcan::{SocketCanChannel, SocketCanDriver, SocketCanError};
 
 /// Virtual CAN interface the tests transmit and receive on.
 const IFACE: &str = "vcan0";
@@ -555,4 +555,84 @@ fn test_vcan_receive_timeout_returns_none_on_idle() {
         "receive_timeout returned too early: {:?}",
         start.elapsed()
     );
+}
+
+// ---------------------------------------------------------------------------
+// FD frames can-hal cannot represent. The kernel takes a CAN FD frame of any
+// length up to 64 from a raw socket, and loops it back to the host's other
+// sockets as written, so a 9-byte FD frame (which `CanFdFrame::new` refuses)
+// reaches a `ReceiveFd` reader. It must be reported, as the classic receive
+// path reports a frame it can't convert, not dropped.
+// ---------------------------------------------------------------------------
+
+/// Write an FD frame of 9 bytes with ID `id`, then a valid sentinel FD frame
+/// with ID `id + 1`, from a raw socket on `IFACE`; returns the sentinel.
+fn write_invalid_fd_then_sentinel(id: u16) -> CanFdFrame {
+    use socketcan::{EmbeddedFrame as _, Socket as _};
+
+    let raw_tx = socketcan::CanFdSocket::open(IFACE).expect("open raw FD socket");
+    let mut raw = socketcan::frame::canfd_frame_default();
+    raw.can_id = u32::from(id);
+    raw.len = 9;
+    raw.data[..9].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    raw_tx
+        .write_frame(&socketcan::CanFdFrame::from(raw))
+        .expect("write a 9-byte FD frame");
+
+    let data = [0xAA; 12];
+    let sc_sentinel =
+        socketcan::CanFdFrame::new(socketcan::StandardId::new(id + 1).unwrap(), &data).unwrap();
+    raw_tx
+        .write_frame(&sc_sentinel)
+        .expect("write the sentinel");
+    CanFdFrame::new(CanId::new_standard(id + 1).unwrap(), &data, false, false).unwrap()
+}
+
+/// Assert a receive call reported the 9-byte frame as `InvalidFrame`.
+fn assert_invalid_fd<T: std::fmt::Debug>(result: &Result<T, SocketCanError>) {
+    assert!(
+        matches!(result, Err(SocketCanError::InvalidFrame(_))),
+        "a 9-byte FD frame must be reported as InvalidFrame, got {result:?}"
+    );
+}
+
+/// Assert the channel still delivers the frame after the reported one.
+fn assert_sentinel_next(rx: &mut SocketCanChannel, sentinel: CanFdFrame) {
+    let next = rx
+        .receive_fd_timeout(Duration::from_secs(1))
+        .expect("receive error after the reported frame")
+        .map(Timestamped::into_frame);
+    assert_eq!(next, Some(Frame::Fd(sentinel)));
+}
+
+#[test]
+fn test_vcan_receive_fd_reports_invalid_fd_length() {
+    let Some(mut rx) = open() else {
+        return;
+    };
+    let sentinel = write_invalid_fd_then_sentinel(0x3A0);
+    assert_invalid_fd(&rx.receive_fd());
+    assert_sentinel_next(&mut rx, sentinel);
+}
+
+#[test]
+fn test_vcan_receive_fd_timeout_reports_invalid_fd_length() {
+    let Some(mut rx) = open() else {
+        return;
+    };
+    let sentinel = write_invalid_fd_then_sentinel(0x3B0);
+    assert_invalid_fd(&rx.receive_fd_timeout(Duration::from_secs(1)));
+    assert_sentinel_next(&mut rx, sentinel);
+}
+
+#[test]
+fn test_vcan_try_receive_fd_reports_invalid_fd_length() {
+    let Some(mut rx) = open() else {
+        return;
+    };
+    let sentinel = write_invalid_fd_then_sentinel(0x3C0);
+    // Both frames are queued once the writes return (local loopback is
+    // synchronous), so the first poll reads the 9-byte one.
+    assert_invalid_fd(&rx.try_receive_fd());
+    assert_sentinel_next(&mut rx, sentinel);
 }
