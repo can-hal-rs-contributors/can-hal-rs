@@ -4,7 +4,7 @@
 //   - Both adapters must be configured for the same bitrate (default: 500 kbit/s)
 //
 // Software requirements:
-//   - Linux: KVASER Linux drivers and libcanlib.so installed
+//   - Linux: KVASER Linux drivers and libcanlib.so.1 installed
 //     Install from: https://www.kvaser.com/downloads-kvaser/
 //   - Windows: CANlib SDK installed (canlib32.dll in system PATH)
 //     Install from: https://www.kvaser.com/downloads-kvaser/

@@ -11,7 +11,7 @@
 //!   - Both connected on the same CAN bus with proper termination
 //!
 //! Software requirements:
-//!   - Linux: pcan driver + libpcanbasic.so, linuxcan (mhydra) + libcanlib.so
+//!   - Linux: pcan driver + libpcanbasic.so, linuxcan (mhydra) + libcanlib.so.1
 //!
 //! Usage:
 //!   cargo run --example cross_adapter_fd -p can-hal-isotp-examples

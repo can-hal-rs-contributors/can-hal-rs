@@ -1,8 +1,9 @@
 // Hardware requirements:
 //   - PCAN USB adapter (e.g. PCAN-USB, PCAN-USB FD, PCAN-USB Pro)
 //   - Optionally, a second CAN adapter connected for a loaded bus
-//   - Note: without a second adapter providing ACK, the bus will enter error states
-//     which is actually useful for observing bus status transitions
+//   - Note: this example only reads the bus state and error counters; it never
+//     transmits. To see the state change, have another node send at a different
+//     bitrate, which makes this controller count receive errors.
 //
 // Software requirements:
 //   - Linux: PCAN driver (peak-linux-driver) and libpcanbasic.so installed
