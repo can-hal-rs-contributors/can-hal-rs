@@ -162,10 +162,14 @@ pub fn from_socketcan_any_frame(frame: CanAnyFrame) -> Result<HalFrame, SocketCa
 /// Convert a can-hal Filter to a socketcan CanFilter.
 ///
 /// Re-clamps the mask to the ID width to defend against struct-literal
-/// `Filter` construction that bypasses `Filter::new`.
+/// `Filter` construction that bypasses `Filter::new`. Both masks include
+/// `CAN_EFF_FLAG`, so the kernel compares the frame type too: a standard
+/// filter rejects extended frames and an extended filter standard ones.
+/// `CAN_RTR_FLAG` stays out of the mask, so remote frames match like data
+/// frames.
 pub fn to_socketcan_filter(filter: &HalFilter) -> CanFilter {
     let (raw_id, mask) = match filter.id {
-        CanId::Standard(v) => (u32::from(v), filter.mask & 0x7FF),
+        CanId::Standard(v) => (u32::from(v), (filter.mask & 0x7FF) | CAN_EFF_FLAG),
         CanId::Extended(v) => (
             (v & 0x1FFF_FFFF) | CAN_EFF_FLAG,
             (filter.mask & 0x1FFF_FFFF) | CAN_EFF_FLAG,
@@ -293,8 +297,8 @@ mod tests {
             mask: 0x7FF,
         };
         let sc = to_socketcan_filter(&filter);
-        // Standard ID should not have CAN_EFF_FLAG set
-        assert_eq!(sc, CanFilter::new(0x100, 0x7FF));
+        // The ID has no CAN_EFF_FLAG, and the mask makes it count.
+        assert_eq!(sc, CanFilter::new(0x100, 0x7FF | CAN_EFF_FLAG));
     }
 
     #[test]

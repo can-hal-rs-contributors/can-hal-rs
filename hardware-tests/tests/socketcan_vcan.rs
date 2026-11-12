@@ -407,6 +407,106 @@ fn test_vcan_empty_filter_set_accepts_all() {
 }
 
 // ---------------------------------------------------------------------------
+// Filters and frame types: a filter matches frames of its own ID type only,
+// so a type with no filter in the set is rejected. Remote frames match on
+// their ID, like data frames.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_vcan_standard_filter_rejects_extended_frames() {
+    let Some((mut tx, mut rx)) = open_pair() else {
+        return;
+    };
+    let std_id = CanId::new_standard(0x100).unwrap();
+    // Low 11 bits equal to 0x100, and the extended ID 0x100 itself.
+    let ext_alias = CanId::new_extended(0x1234_5100).unwrap();
+    let ext_same = CanId::new_extended(0x100).unwrap();
+
+    rx.set_filters(&[Filter::new(std_id, 0x7FF)])
+        .expect("set_filters failed");
+    tx.transmit(&CanFrame::new(ext_alias, &[0x01]).unwrap())
+        .unwrap();
+    tx.transmit(&CanFrame::new(ext_same, &[0x02]).unwrap())
+        .unwrap();
+    tx.transmit(&CanFrame::new(std_id, &[0x03]).unwrap())
+        .unwrap();
+
+    let ids: Vec<CanId> = drain_classic(&mut rx, Duration::from_millis(800))
+        .iter()
+        .map(CanFrame::id)
+        .collect();
+    assert_eq!(ids, vec![std_id], "a standard filter passed {ids:?}");
+}
+
+#[test]
+fn test_vcan_standard_wildcard_filter_rejects_extended_frames() {
+    let Some((mut tx, mut rx)) = open_pair() else {
+        return;
+    };
+    let std_id = CanId::new_standard(0x555).unwrap();
+    let ext_id = CanId::new_extended(0x18DA_00F1).unwrap();
+
+    // Mask 0: any standard ID.
+    rx.set_filters(&[Filter::new(CanId::new_standard(0).unwrap(), 0)])
+        .expect("set_filters failed");
+    tx.transmit(&CanFrame::new(ext_id, &[0x01]).unwrap())
+        .unwrap();
+    tx.transmit(&CanFrame::new(std_id, &[0x02]).unwrap())
+        .unwrap();
+
+    let ids: Vec<CanId> = drain_classic(&mut rx, Duration::from_millis(800))
+        .iter()
+        .map(CanFrame::id)
+        .collect();
+    assert_eq!(
+        ids,
+        vec![std_id],
+        "a standard wildcard filter passed {ids:?}"
+    );
+}
+
+#[test]
+fn test_vcan_extended_filter_rejects_standard_frames() {
+    let Some((mut tx, mut rx)) = open_pair() else {
+        return;
+    };
+    let ext_id = CanId::new_extended(0x100).unwrap();
+    let std_same = CanId::new_standard(0x100).unwrap();
+
+    rx.set_filters(&[Filter::new(ext_id, 0x1FFF_FFFF)])
+        .expect("set_filters failed");
+    tx.transmit(&CanFrame::new(std_same, &[0x01]).unwrap())
+        .unwrap();
+    tx.transmit(&CanFrame::new(ext_id, &[0x02]).unwrap())
+        .unwrap();
+
+    let ids: Vec<CanId> = drain_classic(&mut rx, Duration::from_millis(800))
+        .iter()
+        .map(CanFrame::id)
+        .collect();
+    assert_eq!(ids, vec![ext_id], "an extended filter passed {ids:?}");
+}
+
+#[test]
+fn test_vcan_standard_filter_passes_matching_remote_frame() {
+    let Some((mut tx, mut rx)) = open_pair() else {
+        return;
+    };
+    let id = CanId::new_standard(0x100).unwrap();
+    rx.set_filters(&[Filter::new(id, 0x7FF)])
+        .expect("set_filters failed");
+    let remote = CanFrame::new_remote(id, 4).unwrap();
+    tx.transmit(&remote).unwrap();
+
+    let frames = drain_classic(&mut rx, Duration::from_millis(800));
+    assert_eq!(
+        frames,
+        vec![remote],
+        "the filter must not drop remote frames"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Blocking vs non-blocking mode switching. try_receive flips the socket to
 // non-blocking and receive_timeout flips it back; alternating calls must keep
 // working and not strand the socket in the wrong mode.
