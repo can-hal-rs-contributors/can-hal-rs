@@ -64,10 +64,16 @@ pub fn to_pcan_msg(frame: &CanFrame) -> TPCANMsg {
     }
 }
 
+/// Whether a received message is a status message or an error frame rather
+/// than a frame from the bus.
+const fn is_status_or_error(msg_type: u8) -> bool {
+    msg_type & (ffi::PCAN_MESSAGE_STATUS | ffi::PCAN_MESSAGE_ERRFRAME) != 0
+}
+
 /// Convert a `TPCANMsg` to a `CanFrame`, a remote frame for an RTR message.
-/// Returns `Ok(None)` for status messages.
+/// Returns `Ok(None)` for status messages and error frames.
 pub fn from_pcan_msg(msg: &TPCANMsg) -> Result<Option<CanFrame>, PcanError> {
-    if msg.msg_type & ffi::PCAN_MESSAGE_STATUS != 0 {
+    if is_status_or_error(msg.msg_type) {
         return Ok(None);
     }
     let id = from_pcan_id(msg.id, msg.msg_type)?;
@@ -114,9 +120,9 @@ pub fn to_pcan_msg_fd(frame: &CanFdFrame) -> TPCANMsgFD {
 }
 
 /// Convert a `TPCANMsgFD` to a `Frame`.
-/// Returns `Ok(None)` for status messages.
+/// Returns `Ok(None)` for status messages and error frames.
 pub fn from_pcan_msg_fd(msg: &TPCANMsgFD) -> Result<Option<Frame>, PcanError> {
-    if msg.msg_type & ffi::PCAN_MESSAGE_STATUS != 0 {
+    if is_status_or_error(msg.msg_type) {
         return Ok(None);
     }
 
@@ -371,6 +377,34 @@ mod tests {
             msg_type: ffi::PCAN_MESSAGE_STATUS,
             dlc: 0,
             data: [0; 64],
+        };
+        assert!(from_pcan_msg_fd(&msg).unwrap().is_none());
+    }
+
+    // An error frame (with PCAN_ALLOW_ERROR_FRAMES on) carries the error type
+    // as its ID (1 = bit, 2 = form, 4 = stuff, 8 = other) and the counters in
+    // its data, so it isn't a frame from the bus.
+    #[test]
+    fn skip_error_frame() {
+        let msg = TPCANMsg {
+            id: 0x1,
+            msg_type: ffi::PCAN_MESSAGE_ERRFRAME,
+            len: 4,
+            data: [0, 0, 8, 128, 0, 0, 0, 0],
+        };
+        assert!(from_pcan_msg(&msg).unwrap().is_none());
+    }
+
+    #[test]
+    fn skip_error_frame_fd() {
+        let mut data = [0; 64];
+        data[2] = 8;
+        data[3] = 128;
+        let msg = TPCANMsgFD {
+            id: 0x1,
+            msg_type: ffi::PCAN_MESSAGE_ERRFRAME,
+            dlc: 4,
+            data,
         };
         assert!(from_pcan_msg_fd(&msg).unwrap().is_none());
     }

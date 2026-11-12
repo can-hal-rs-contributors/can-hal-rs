@@ -69,6 +69,7 @@ pub const PCAN_MESSAGE_EXTENDED: u8 = 0x02;
 pub const PCAN_MESSAGE_FD: u8 = 0x04;
 pub const PCAN_MESSAGE_BRS: u8 = 0x08;
 pub const PCAN_MESSAGE_ESI: u8 = 0x10;
+pub const PCAN_MESSAGE_ERRFRAME: u8 = 0x40;
 pub const PCAN_MESSAGE_STATUS: u8 = 0x80;
 
 // ---------------------------------------------------------------------------
