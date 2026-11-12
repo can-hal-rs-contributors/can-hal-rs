@@ -105,8 +105,8 @@ pub const PCAN_ERROR_ILLOPERATION: u32 = 0x8000000;
 // Filter modes
 // ---------------------------------------------------------------------------
 
-pub const PCAN_MODE_STANDARD: u8 = 0x01;
-pub const PCAN_MODE_EXTENDED: u8 = 0x02;
+pub const PCAN_MODE_STANDARD: u8 = PCAN_MESSAGE_STANDARD;
+pub const PCAN_MODE_EXTENDED: u8 = PCAN_MESSAGE_EXTENDED;
 
 // ---------------------------------------------------------------------------
 // Parameter IDs (for CAN_GetValue / CAN_SetValue)
@@ -116,8 +116,6 @@ pub const PCAN_RECEIVE_EVENT: u8 = 0x03;
 pub const PCAN_MESSAGE_FILTER: u8 = 0x04;
 pub const PCAN_BUSOFF_AUTORESET: u8 = 0x07;
 pub const PCAN_LISTEN_ONLY: u8 = 0x08;
-pub const PCAN_CONTROLLER_NUMBER: u8 = 0x1A;
-pub const PCAN_CHANNEL_CONDITION: u8 = 0x09;
 pub const PCAN_BUSERROR_READ: u8 = 0x24;
 pub const PCAN_BUSERROR_WRITE: u8 = 0x25;
 
@@ -226,5 +224,12 @@ mod tests {
     #[test]
     fn invalid_bus_type() {
         assert_eq!(pcan_handle(3, 0), None);
+    }
+
+    // PCANBasic.h defines the filter modes as the message type flags.
+    #[test]
+    fn filter_modes_match_the_header() {
+        assert_eq!(PCAN_MODE_STANDARD, 0x00);
+        assert_eq!(PCAN_MODE_EXTENDED, 0x02);
     }
 }
