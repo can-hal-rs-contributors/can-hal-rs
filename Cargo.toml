@@ -13,11 +13,13 @@ members = [
     "hardware-tests",
 ]
 
-# Bump both lines together on release; members inherit via `workspace = true`.
+# On release, bump `version` here and the can-hal-rs version in
+# [workspace.dependencies] together; members inherit via `workspace = true`.
 [workspace.package]
 version = "0.4.4"
-# The MSRV, for every member. CI's msrv job checks it; change the README's
-# badge with it.
+# The MSRV, for every member. CI's msrv job checks it. Change with it the
+# MSRV badge in all six READMEs, and the "1.81" in can-hal/README.md and
+# AGENTS.md.
 rust-version = "1.81"
 
 [workspace.dependencies]
@@ -25,17 +27,22 @@ can-hal = { version = "0.4.4", path = "can-hal", package = "can-hal-rs" }
 
 # Workspace-wide Clippy configuration
 #
-# All crates inherit these via `[lints] workspace = true`.
-# CI runs clippy with `-D warnings`, so every `warn` here is effectively `deny`.
+# Every member inherits these via `[lints] workspace = true` except
+# can-hal-rs, which keeps an inline copy so it builds outside the workspace
+# (44d16d1); change both. CI runs clippy with `-D warnings` on can-hal-rs,
+# can-hal-isotp, can-hal-pcan and can-hal-kvaser, so for them every `warn`
+# here is effectively `deny`.
 #
 # Philosophy: enable the pedantic group wholesale, then suppress the lints
 # that are too noisy for a CAN-bus project with FFI layers. Cherry-pick from
 # restriction, nursery, and cargo for additional safety.
 #
 # Lints left out intentionally (future adoption, requires dedicated cleanup):
-#   clippy::unwrap_used / clippy::expect_used  - ~140 non-test call sites
+#   clippy::unwrap_used / clippy::expect_used  - ~85 non-test call sites, all
+#                                                but 2 in the examples
 #   clippy::arithmetic_side_effects            - needs audit of prescaler/DLC math
-#   clippy::as_conversions                     - ~76 FFI cast sites
+#   clippy::as_conversions                     - ~120 non-test cast sites, ~90
+#                                                in the libraries
 
 [workspace.lints.clippy]
 # Pedantic (enable group, suppress noisy lints)
