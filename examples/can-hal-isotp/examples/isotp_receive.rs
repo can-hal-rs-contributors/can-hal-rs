@@ -14,8 +14,9 @@
 //
 // Default interface: vcan0
 //
-// The receiver uses tx_id=0x7E8, rx_id=0x7E0 (the inverse of "send").
-// Run the "send" example in another terminal to send a message.
+// The receiver uses tx_id=0x7E8, rx_id=0x7E0 (the inverse of isotp_send).
+// Start this example first, then run the isotp_send example in another
+// terminal within its 10 s timeout.
 
 use std::env;
 use std::time::Duration;
