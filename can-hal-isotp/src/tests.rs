@@ -867,3 +867,75 @@ fn test_fd_receive_times_out_on_invalid_frames_only() {
         "expected Timeout, got {result:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// While send() waits for an FC, a frame that fails to parse is ignored unless
+// it is an FC: a malformed FC still ends the transfer, as in the Linux kernel
+// (isotp_rcv_fc), where other frames never reach the sender.
+// ---------------------------------------------------------------------------
+
+pub fn is_fc_pci(pdu: &[u8]) -> bool {
+    pdu.first().is_some_and(|b| b >> 4 == 0x3)
+}
+
+pub fn invalid_non_fc_frames() -> Vec<CanFrame> {
+    INVALID_PDUS
+        .iter()
+        .filter(|d| !is_fc_pci(d))
+        .map(|d| make_frame(rx_id(), d))
+        .collect()
+}
+
+#[test]
+fn test_send_ignores_invalid_non_fc_frames() {
+    let mut rx = invalid_non_fc_frames();
+    rx.push(fc_cts());
+    let mut ch = IsoTpChannel::new(MockChannel::new(rx), default_config());
+    let payload: Vec<u8> = (0..20).collect();
+    ch.send(&payload).unwrap();
+    // FF + 2 CFs.
+    assert_eq!(ch.into_inner().tx_frames.len(), 3);
+}
+
+#[test]
+fn test_send_fails_on_malformed_fc() {
+    for pdu in INVALID_PDUS.iter().filter(|d| is_fc_pci(d)) {
+        let mock = MockChannel::new(vec![make_frame(rx_id(), pdu)]);
+        let mut ch = IsoTpChannel::new(mock, default_config());
+        let payload: Vec<u8> = (0..20).collect();
+        let result = ch.send(&payload);
+        assert!(
+            matches!(result, Err(IsoTpError::InvalidFrame)),
+            "FC {pdu:02X?}: expected InvalidFrame, got {result:?}"
+        );
+    }
+}
+
+#[test]
+fn test_fd_send_ignores_invalid_non_fc_frames() {
+    let mut rx: Vec<Frame> = INVALID_PDUS
+        .iter()
+        .filter(|d| !is_fc_pci(d))
+        .map(|d| fd_frame(d))
+        .collect();
+    rx.push(fd_frame(&[0x30, 0, 0]));
+    let mut ch = IsoTpFdChannel::new(FdMockChannel::new(rx), default_config());
+    let payload: Vec<u8> = (0u8..126).collect();
+    ch.send(&payload).unwrap();
+    // FF + 2 CFs.
+    assert_eq!(ch.into_inner().tx_frames.len(), 3);
+}
+
+#[test]
+fn test_fd_send_fails_on_malformed_fc() {
+    for pdu in INVALID_PDUS.iter().filter(|d| is_fc_pci(d)) {
+        let mock = FdMockChannel::new(vec![fd_frame(pdu)]);
+        let mut ch = IsoTpFdChannel::new(mock, default_config());
+        let payload: Vec<u8> = (0u8..126).collect();
+        let result = ch.send(&payload);
+        assert!(
+            matches!(result, Err(IsoTpError::InvalidFrame)),
+            "FC {pdu:02X?}: expected InvalidFrame, got {result:?}"
+        );
+    }
+}

@@ -6,7 +6,9 @@ use can_hal::frame::CanFdFrame;
 
 use crate::config::{AddressingMode, IsoTpConfig};
 use crate::error::IsoTpError;
-use crate::frame::{self, interpret_st_min, next_fd_dlc, FcFlag, IsoTpFrame, MAX_RX_PREALLOC};
+use crate::frame::{
+    self, has_fc_pci, interpret_st_min, next_fd_dlc, FcFlag, IsoTpFrame, MAX_RX_PREALLOC,
+};
 
 /// Synchronous ISO-TP transport channel for CAN FD, wrapping a `can-hal` FD channel.
 ///
@@ -259,8 +261,15 @@ where
                 continue;
             }
 
-            let isotp =
-                IsoTpFrame::parse(frame.data(), overhead).map_err(|_| IsoTpError::InvalidFrame)?;
+            let isotp = match IsoTpFrame::parse(frame.data(), overhead) {
+                Ok(isotp) => isotp,
+                // A malformed FC ends the transfer, as in the Linux kernel;
+                // any other frame that doesn't parse isn't for a sender.
+                Err(_) if has_fc_pci(frame.data(), overhead) => {
+                    return Err(IsoTpError::InvalidFrame);
+                }
+                Err(_) => continue,
+            };
 
             if let IsoTpFrame::FlowControl {
                 flag,

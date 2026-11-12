@@ -141,6 +141,13 @@ impl<'a> IsoTpFrame<'a> {
     }
 }
 
+/// Whether `raw` carries the Flow Control PCI type (0x3), valid FC or not.
+///
+/// `overhead` is as for [`IsoTpFrame::parse`].
+pub(crate) fn has_fc_pci(raw: &[u8], overhead: usize) -> bool {
+    raw.get(overhead).is_some_and(|pci| pci >> 4 == 0x3)
+}
+
 /// Build a Single Frame into `buf`. Returns the total frame length.
 #[allow(clippy::cast_possible_truncation)] // protocol-bounded: SF data <= 7 bytes
 pub fn build_sf(buf: &mut [u8], data: &[u8], overhead: usize) -> usize {

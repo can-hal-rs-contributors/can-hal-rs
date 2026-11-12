@@ -674,3 +674,62 @@ async fn test_async_receive_ignores_invalid_frames() {
 async fn test_async_fd_receive_ignores_invalid_frames() {
     assert_fd_receive_ignores(&invalid_fd_frames()).await;
 }
+
+// ---------------------------------------------------------------------------
+// While send() waits for an FC, a frame that fails to parse is ignored unless
+// it is an FC (see tests.rs).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_async_send_ignores_invalid_non_fc_frames() {
+    let mut rx = invalid_non_fc_frames();
+    rx.push(fc_cts_frame());
+    let mut isotp = AsyncIsoTpChannel::new(mock_with(rx), default_config());
+    let payload: Vec<u8> = (0..20).collect();
+    isotp.send(&payload).await.unwrap();
+    // FF + 2 CFs.
+    assert_eq!(isotp.into_inner().tx_frames.len(), 3);
+}
+
+#[tokio::test]
+async fn test_async_send_fails_on_malformed_fc() {
+    for pdu in INVALID_PDUS.iter().filter(|d| is_fc_pci(d)) {
+        let mock = mock_with([can_frame(rx_id(), pdu)]);
+        let mut isotp = AsyncIsoTpChannel::new(mock, default_config());
+        let payload: Vec<u8> = (0..20).collect();
+        let result = isotp.send(&payload).await;
+        assert!(
+            matches!(result, Err(IsoTpError::InvalidFrame)),
+            "FC {pdu:02X?}: expected InvalidFrame, got {result:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_async_fd_send_ignores_invalid_non_fc_frames() {
+    let mut rx: Vec<Frame> = INVALID_PDUS
+        .iter()
+        .filter(|d| !is_fc_pci(d))
+        .map(|d| fd_frame(d))
+        .collect();
+    rx.push(fd_frame(&[0x30, 0, 0]));
+    let mut isotp = AsyncIsoTpFdChannel::new(AsyncFdMockChannel::new(rx), default_config());
+    let payload: Vec<u8> = (0u8..126).collect();
+    isotp.send(&payload).await.unwrap();
+    // FF + 2 CFs.
+    assert_eq!(isotp.into_inner().tx_frames.len(), 3);
+}
+
+#[tokio::test]
+async fn test_async_fd_send_fails_on_malformed_fc() {
+    for pdu in INVALID_PDUS.iter().filter(|d| is_fc_pci(d)) {
+        let mock = AsyncFdMockChannel::new([fd_frame(pdu)]);
+        let mut isotp = AsyncIsoTpFdChannel::new(mock, default_config());
+        let payload: Vec<u8> = (0u8..126).collect();
+        let result = isotp.send(&payload).await;
+        assert!(
+            matches!(result, Err(IsoTpError::InvalidFrame)),
+            "FC {pdu:02X?}: expected InvalidFrame, got {result:?}"
+        );
+    }
+}

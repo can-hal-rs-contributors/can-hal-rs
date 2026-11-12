@@ -4,7 +4,7 @@ use can_hal::frame::CanFrame;
 
 use crate::config::{AddressingMode, IsoTpConfig};
 use crate::error::IsoTpError;
-use crate::frame::{self, interpret_st_min, FcFlag, IsoTpFrame};
+use crate::frame::{self, has_fc_pci, interpret_st_min, FcFlag, IsoTpFrame};
 
 /// Async ISO-TP transport channel wrapping an async `can-hal` CAN channel.
 pub struct AsyncIsoTpChannel<C> {
@@ -268,8 +268,16 @@ where
                     continue;
                 }
 
-                let isotp = IsoTpFrame::parse(can_frame.data(), overhead)
-                    .map_err(|_| IsoTpError::InvalidFrame)?;
+                let isotp = match IsoTpFrame::parse(can_frame.data(), overhead) {
+                    Ok(isotp) => isotp,
+                    // A malformed FC ends the transfer, as in the Linux
+                    // kernel; any other frame that doesn't parse isn't for a
+                    // sender.
+                    Err(_) if has_fc_pci(can_frame.data(), overhead) => {
+                        return Err(IsoTpError::InvalidFrame);
+                    }
+                    Err(_) => continue,
+                };
 
                 if let IsoTpFrame::FlowControl {
                     flag,
