@@ -217,7 +217,8 @@ pub fn build_fc(
     pos + 3
 }
 
-/// Returns the next valid CAN FD DLC value >= `len`. Panics if `len > 64`.
+/// Returns the smallest valid CAN FD data length (in bytes) that is >= `len`.
+/// Panics if `len > 64`.
 pub(crate) fn next_fd_dlc(len: usize) -> usize {
     match len {
         0..=8 => len,

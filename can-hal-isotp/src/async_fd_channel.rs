@@ -300,8 +300,8 @@ where
         self.transmit_padded_fd(&mut buf, len).await
     }
 
-    /// CAN FD frames must use a valid DLC size, so always round up. Fill gap
-    /// with the configured padding byte or 0x00.
+    /// CAN FD frames must have a valid data length, so always round up. Fill
+    /// the gap with the configured padding byte or 0x00.
     async fn transmit_padded_fd(
         &mut self,
         buf: &mut [u8; 64],

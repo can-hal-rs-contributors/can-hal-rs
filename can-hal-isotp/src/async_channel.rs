@@ -127,8 +127,8 @@ where
     pub async fn receive(&mut self) -> Result<Vec<u8>, IsoTpError<E>> {
         let overhead = self.config.overhead();
 
-        // Wait for first frame (SF or FF) from rx_id.
-        // Returns None for a complete single frame, or Some(total_len) for a first frame.
+        // Wait for first frame (SF or FF) from rx_id. Yields (None, payload)
+        // for a single frame, or (Some(FF_DL), the FF's data) for a first frame.
         let (total_len, mut collected) = tokio::time::timeout(self.config.timeout, async {
             loop {
                 let ts_frame = self.channel.receive().await.map_err(IsoTpError::CanError)?;

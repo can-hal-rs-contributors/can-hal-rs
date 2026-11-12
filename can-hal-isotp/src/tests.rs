@@ -374,8 +374,8 @@ fn test_send_fc_overflow() {
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn test_send_long_ff_path() {
     // Verifies the 32-bit length encoding path (long FF) for payloads > 4095 bytes.
-    // Note: the PayloadTooLarge error (data.len() > 0xFFFF_FFFF) cannot be triggered
-    // in practice on a 64-bit system since such an allocation would fail first.
+    // send()'s PayloadTooLarge (data.len() > u32::MAX) isn't tested: it needs a
+    // payload of over 4 GiB.
     let payload: Vec<u8> = (0..4096).map(|i| (i & 0xFF) as u8).collect();
 
     // Need FC(CTS) for the wait_for_fc call

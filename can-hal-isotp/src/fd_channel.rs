@@ -315,9 +315,10 @@ where
 
     /// Pad and transmit a CAN FD frame.
     ///
-    /// CAN FD frames must use a valid DLC size (0-8, 12, 16, 20, 24, 32, 48, 64),
-    /// so the frame is always rounded up to the next valid size. The gap bytes are
-    /// filled with the configured padding byte, or 0x00 if padding is not set.
+    /// CAN FD frames must have a valid data length (0-8, 12, 16, 20, 24, 32, 48
+    /// or 64 bytes), so the frame is always rounded up to the next valid length.
+    /// The gap bytes are filled with the configured padding byte, or 0x00 if
+    /// padding is not set.
     fn transmit_padded_fd(&mut self, buf: &mut [u8; 64], len: usize) -> Result<(), IsoTpError<E>> {
         let padded = next_fd_dlc(len);
         let pad_byte = self.config.padding.unwrap_or(0x00);
