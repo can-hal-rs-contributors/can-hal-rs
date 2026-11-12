@@ -1,14 +1,16 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use can_hal::async_channel::{AsyncReceive, AsyncTransmit};
-use can_hal::frame::{CanFrame, Timestamped};
+use can_hal::async_channel::{AsyncReceive, AsyncReceiveFd, AsyncTransmit, AsyncTransmitFd};
+use can_hal::frame::{CanFdFrame, CanFrame, Frame, Timestamped};
 use can_hal::CanId;
 
 use crate::async_channel::AsyncIsoTpChannel;
+use crate::async_fd_channel::AsyncIsoTpFdChannel;
 use crate::config::IsoTpConfig;
 use crate::error::IsoTpError;
 use crate::frame::FcFlag;
+use crate::tests::*;
 
 // ---------------------------------------------------------------------------
 // Mock error type
@@ -71,6 +73,49 @@ impl AsyncReceive for AsyncMockChannel {
     }
 }
 
+/// CAN FD counterpart of [`AsyncMockChannel`].
+struct AsyncFdMockChannel {
+    tx_frames: Vec<CanFdFrame>,
+    rx_queue: VecDeque<Frame>,
+}
+
+impl AsyncFdMockChannel {
+    fn new(rx: impl IntoIterator<Item = Frame>) -> Self {
+        Self {
+            tx_frames: Vec::new(),
+            rx_queue: rx.into_iter().collect(),
+        }
+    }
+}
+
+impl AsyncTransmitFd for AsyncFdMockChannel {
+    type Error = MockError;
+
+    fn transmit_fd(
+        &mut self,
+        frame: &CanFdFrame,
+    ) -> impl std::future::Future<Output = Result<(), MockError>> + Send {
+        self.tx_frames.push(frame.clone());
+        async { Ok(()) }
+    }
+}
+
+impl AsyncReceiveFd for AsyncFdMockChannel {
+    type Error = MockError;
+    type Timestamp = Instant;
+
+    fn receive_fd(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<Timestamped<Frame, Instant>, MockError>> + Send
+    {
+        let frame = self
+            .rx_queue
+            .pop_front()
+            .expect("rx_queue unexpectedly empty");
+        async move { Ok(Timestamped::new(frame, Instant::now())) }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -90,6 +135,13 @@ fn default_config() -> IsoTpConfig {
 /// Build a CAN frame with the given id and raw bytes.
 fn can_frame(id: CanId, data: &[u8]) -> CanFrame {
     CanFrame::new(id, data).unwrap()
+}
+
+/// An [`AsyncMockChannel`] that will hand out `frames` in order.
+fn mock_with(frames: impl IntoIterator<Item = CanFrame>) -> AsyncMockChannel {
+    let mut mock = AsyncMockChannel::new();
+    mock.rx_queue.extend(frames);
+    mock
 }
 
 /// Build a Flow Control frame (CTS, bs=0, st_min=0) from the receiver side.
@@ -259,4 +311,100 @@ async fn test_async_send_fc_wait_limit() {
         IsoTpError::WaitLimitExceeded => {} // expected
         other => panic!("expected WaitLimitExceeded, got: {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// An SF or FF during a reception (ISO 15765-2 unexpected N_PDU): the
+// reception in progress is dropped and the new frame is processed.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_async_receive_sf_aborts_reception() {
+    let a: Vec<u8> = (0..13).collect();
+    let mock = mock_with([
+        classic_ff(13, &a),
+        can_frame(rx_id(), &[0x03, 0xAA, 0xBB, 0xCC]),
+        classic_cf(1, &a[6..13]),
+    ]);
+    let mut isotp = AsyncIsoTpChannel::new(mock, default_config());
+    assert_eq!(isotp.receive().await.unwrap(), vec![0xAA, 0xBB, 0xCC]);
+}
+
+#[tokio::test]
+async fn test_async_receive_ff_replaces_partial_message() {
+    let a: Vec<u8> = (0..13).collect();
+    let b: Vec<u8> = (100..113).collect();
+    let mock = mock_with([
+        classic_ff(13, &a),
+        classic_ff(13, &b),
+        classic_cf(1, &b[6..13]),
+    ]);
+    let mut isotp = AsyncIsoTpChannel::new(mock, default_config());
+    assert_eq!(isotp.receive().await.unwrap(), b);
+}
+
+#[tokio::test]
+async fn test_async_receive_ff_restarts_reception() {
+    // See test_receive_ff_restarts_reception in tests.rs.
+    let a: Vec<u8> = (0..20).collect();
+    let b: Vec<u8> = (100..120).collect();
+    let mock = mock_with([
+        classic_ff(20, &a),
+        classic_cf(1, &a[6..13]),
+        classic_ff(20, &b),
+        classic_cf(1, &b[6..13]),
+        classic_cf(2, &b[13..20]),
+    ]);
+    let cfg = IsoTpConfig {
+        block_size: 2,
+        ..default_config()
+    };
+    let mut isotp = AsyncIsoTpChannel::new(mock, cfg);
+    assert_eq!(isotp.receive().await.unwrap(), b);
+    let inner = isotp.into_inner();
+    assert_eq!(inner.tx_frames.len(), 2);
+    assert!(inner.tx_frames.iter().all(|f| f.data()[0] == 0x30));
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_sf_aborts_reception() {
+    let a: Vec<u8> = (0u8..125).collect();
+    let mock = AsyncFdMockChannel::new([
+        fd_ff(125, &a),
+        fd_sf(&[0xAA, 0xBB, 0xCC]),
+        fd_cf(1, &a[62..]),
+    ]);
+    let mut isotp = AsyncIsoTpFdChannel::new(mock, default_config());
+    assert_eq!(isotp.receive().await.unwrap(), vec![0xAA, 0xBB, 0xCC]);
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_ff_replaces_partial_message() {
+    let a: Vec<u8> = (0u8..125).collect();
+    let b: Vec<u8> = (100u8..225).collect();
+    let mock = AsyncFdMockChannel::new([fd_ff(125, &a), fd_ff(125, &b), fd_cf(1, &b[62..])]);
+    let mut isotp = AsyncIsoTpFdChannel::new(mock, default_config());
+    assert_eq!(isotp.receive().await.unwrap(), b);
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_ff_restarts_reception() {
+    let a: Vec<u8> = (0u8..200).collect();
+    let b: Vec<u8> = (50u8..238).collect();
+    let mock = AsyncFdMockChannel::new([
+        fd_ff(200, &a),
+        fd_cf(1, &a[62..125]),
+        fd_ff(188, &b),
+        fd_cf(1, &b[62..125]),
+        fd_cf(2, &b[125..]),
+    ]);
+    let cfg = IsoTpConfig {
+        block_size: 2,
+        ..default_config()
+    };
+    let mut isotp = AsyncIsoTpFdChannel::new(mock, cfg);
+    assert_eq!(isotp.receive().await.unwrap(), b);
+    let inner = isotp.into_inner();
+    assert_eq!(inner.tx_frames.len(), 2);
+    assert!(inner.tx_frames.iter().all(|f| f.data()[0] == 0x30));
 }

@@ -1,13 +1,15 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use can_hal::channel::{Receive, Transmit};
-use can_hal::frame::{CanFrame, Timestamped};
+use can_hal::channel::{Receive, ReceiveFd, Transmit, TransmitFd};
+use can_hal::frame::{CanFdFrame, CanFrame, Frame, Timestamped};
 use can_hal::id::CanId;
 
 use crate::channel::IsoTpChannel;
 use crate::config::{AddressingMode, IsoTpConfig};
 use crate::error::IsoTpError;
+use crate::fd_channel::IsoTpFdChannel;
+use crate::frame::{build_cf, build_cf_fd, build_ff, build_ff_fd, build_sf_fd, next_fd_dlc};
 
 // ---------------------------------------------------------------------------
 // Mock
@@ -31,6 +33,9 @@ impl std::error::Error for MockError {}
 pub struct MockChannel {
     pub tx_frames: Vec<CanFrame>,
     pub rx_queue: VecDeque<CanFrame>,
+    /// How long each frame takes to arrive in `receive_timeout`, counted from
+    /// the call. Zero hands frames out at once.
+    pub rx_delay: Duration,
 }
 
 impl MockChannel {
@@ -38,8 +43,18 @@ impl MockChannel {
         Self {
             tx_frames: Vec::new(),
             rx_queue: rx.into_iter().collect(),
+            rx_delay: Duration::ZERO,
         }
     }
+}
+
+/// Sleep as `receive_timeout(timeout)` would for a frame that arrives `delay`
+/// after the call, and say whether it arrived in time.
+fn frame_arrives(delay: Duration, timeout: Duration) -> bool {
+    if !delay.is_zero() {
+        std::thread::sleep(delay.min(timeout));
+    }
+    delay <= timeout
 }
 
 impl Transmit for MockChannel {
@@ -69,12 +84,67 @@ impl Receive for MockChannel {
 
     fn receive_timeout(
         &mut self,
-        _timeout: Duration,
+        timeout: Duration,
     ) -> Result<Option<Timestamped<CanFrame, Instant>>, MockError> {
+        if !frame_arrives(self.rx_delay, timeout) {
+            return Ok(None);
+        }
         Ok(self
             .rx_queue
             .pop_front()
             .map(|f| Timestamped::new(f, Instant::now())))
+    }
+}
+
+/// CAN FD counterpart of [`MockChannel`].
+pub struct FdMockChannel {
+    pub tx_frames: Vec<CanFdFrame>,
+    pub rx_queue: VecDeque<Frame>,
+    /// As [`MockChannel::rx_delay`], for `receive_fd_timeout`.
+    pub rx_delay: Duration,
+}
+
+impl FdMockChannel {
+    pub fn new(rx: impl IntoIterator<Item = Frame>) -> Self {
+        Self {
+            tx_frames: Vec::new(),
+            rx_queue: rx.into_iter().collect(),
+            rx_delay: Duration::ZERO,
+        }
+    }
+}
+
+impl TransmitFd for FdMockChannel {
+    type Error = MockError;
+    fn transmit_fd(&mut self, frame: &CanFdFrame) -> Result<(), MockError> {
+        self.tx_frames.push(frame.clone());
+        Ok(())
+    }
+}
+
+impl ReceiveFd for FdMockChannel {
+    type Error = MockError;
+    type Timestamp = Instant;
+
+    fn receive_fd(&mut self) -> Result<Timestamped<Frame, Instant>, MockError> {
+        self.try_receive_fd()?.ok_or(MockError)
+    }
+
+    fn try_receive_fd(&mut self) -> Result<Option<Timestamped<Frame, Instant>>, MockError> {
+        Ok(self
+            .rx_queue
+            .pop_front()
+            .map(|f| Timestamped::new(f, Instant::now())))
+    }
+
+    fn receive_fd_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<Timestamped<Frame, Instant>>, MockError> {
+        if !frame_arrives(self.rx_delay, timeout) {
+            return Ok(None);
+        }
+        self.try_receive_fd()
     }
 }
 
@@ -117,6 +187,49 @@ fn fc_wait() -> CanFrame {
 
 fn fc_overflow() -> CanFrame {
     fc_frame(2, 0, 0)
+}
+
+/// A classic First Frame on rx_id for a `total`-byte message starting with `payload`.
+pub fn classic_ff(total: usize, payload: &[u8]) -> CanFrame {
+    let mut buf = [0u8; 8];
+    build_ff(&mut buf, payload, total, 0);
+    make_frame(rx_id(), &buf)
+}
+
+/// A classic Consecutive Frame on rx_id.
+pub fn classic_cf(sn: u8, chunk: &[u8]) -> CanFrame {
+    let mut buf = [0u8; 8];
+    let len = build_cf(&mut buf, chunk, sn, 0);
+    make_frame(rx_id(), &buf[..len])
+}
+
+/// A CAN FD frame on rx_id, rounded up to a valid FD length with 0xCC.
+pub fn fd_frame(data: &[u8]) -> Frame {
+    let mut buf = [0xCCu8; 64];
+    buf[..data.len()].copy_from_slice(data);
+    let len = next_fd_dlc(data.len());
+    Frame::Fd(CanFdFrame::new(rx_id(), &buf[..len], true, false).unwrap())
+}
+
+/// A 64-byte FD First Frame on rx_id for a `total`-byte message starting with `payload`.
+pub fn fd_ff(total: usize, payload: &[u8]) -> Frame {
+    let mut buf = [0u8; 64];
+    build_ff_fd(&mut buf, payload, total, 0);
+    fd_frame(&buf)
+}
+
+/// An FD Consecutive Frame on rx_id.
+pub fn fd_cf(sn: u8, chunk: &[u8]) -> Frame {
+    let mut buf = [0u8; 64];
+    let len = build_cf_fd(&mut buf, chunk, sn, 0);
+    fd_frame(&buf[..len])
+}
+
+/// An FD Single Frame on rx_id.
+pub fn fd_sf(payload: &[u8]) -> Frame {
+    let mut buf = [0u8; 64];
+    let len = build_sf_fd(&mut buf, payload, 0);
+    fd_frame(&buf[..len])
 }
 
 // ---------------------------------------------------------------------------
@@ -445,4 +558,149 @@ fn test_long_ff() {
     let data = ch.receive().unwrap();
     assert_eq!(data.len(), total_len);
     assert_eq!(data, payload);
+}
+
+// ---------------------------------------------------------------------------
+// An SF or FF during a reception (ISO 15765-2 unexpected N_PDU): the
+// reception in progress is dropped and the new frame is processed.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_receive_sf_aborts_reception() {
+    let a: Vec<u8> = (0..13).collect();
+    let frames = vec![
+        classic_ff(13, &a),
+        // An SF arrives before the CF that would complete message A.
+        make_frame(rx_id(), &[0x03, 0xAA, 0xBB, 0xCC]),
+        classic_cf(1, &a[6..13]),
+    ];
+    let mut ch = IsoTpChannel::new(MockChannel::new(frames), default_config());
+    assert_eq!(ch.receive().unwrap(), vec![0xAA, 0xBB, 0xCC]);
+}
+
+#[test]
+fn test_receive_ff_replaces_partial_message() {
+    // Ignoring B's FF would splice A's first 6 bytes with B's CF.
+    let a: Vec<u8> = (0..13).collect();
+    let b: Vec<u8> = (100..113).collect();
+    let frames = vec![
+        classic_ff(13, &a),
+        classic_ff(13, &b),
+        classic_cf(1, &b[6..13]),
+    ];
+    let mut ch = IsoTpChannel::new(MockChannel::new(frames), default_config());
+    assert_eq!(ch.receive().unwrap(), b);
+}
+
+#[test]
+fn test_receive_ff_restarts_reception() {
+    // A CF of message A arrives before B's FF, so B must restart the
+    // sequence number at 1 and the block count at 0: with block_size 2, a
+    // block count left at 1 would send a third FC after B's first CF.
+    let a: Vec<u8> = (0..20).collect();
+    let b: Vec<u8> = (100..120).collect();
+    let frames = vec![
+        classic_ff(20, &a),
+        classic_cf(1, &a[6..13]),
+        classic_ff(20, &b),
+        classic_cf(1, &b[6..13]),
+        classic_cf(2, &b[13..20]),
+    ];
+    let cfg = IsoTpConfig {
+        block_size: 2,
+        ..default_config()
+    };
+    let mut ch = IsoTpChannel::new(MockChannel::new(frames), cfg);
+    assert_eq!(ch.receive().unwrap(), b);
+    // One FC(CTS) per FF, none for a full block.
+    let inner = ch.into_inner();
+    assert_eq!(inner.tx_frames.len(), 2);
+    assert!(inner.tx_frames.iter().all(|f| f.data()[0] == 0x30));
+}
+
+/// Every frame arrives 100 ms after it is asked for, and the timeout is
+/// 250 ms. FF(A) at 100 ms starts N_Cr, which would end at 350 ms; FF(B) at
+/// 300 ms must restart it, or B's CF at 500 ms comes too late.
+fn ff_restart_config() -> IsoTpConfig {
+    IsoTpConfig {
+        timeout: Duration::from_millis(250),
+        ..default_config()
+    }
+}
+
+#[test]
+fn test_receive_ff_restarts_n_cr() {
+    let a: Vec<u8> = (0..20).collect();
+    let b: Vec<u8> = (100..113).collect();
+    let mut mock = MockChannel::new(vec![
+        classic_ff(20, &a),
+        fc_cts(),
+        classic_ff(13, &b),
+        fc_cts(),
+        classic_cf(1, &b[6..13]),
+    ]);
+    mock.rx_delay = Duration::from_millis(100);
+    let mut ch = IsoTpChannel::new(mock, ff_restart_config());
+    assert_eq!(ch.receive().unwrap(), b);
+}
+
+#[test]
+fn test_fd_receive_ff_restarts_n_cr() {
+    let a: Vec<u8> = (0u8..200).collect();
+    let b: Vec<u8> = (50u8..175).collect();
+    let fc = fd_frame(&[0x30, 0, 0]);
+    let mut mock = FdMockChannel::new(vec![
+        fd_ff(200, &a),
+        fc.clone(),
+        fd_ff(125, &b),
+        fc,
+        fd_cf(1, &b[62..]),
+    ]);
+    mock.rx_delay = Duration::from_millis(100);
+    let mut ch = IsoTpFdChannel::new(mock, ff_restart_config());
+    assert_eq!(ch.receive().unwrap(), b);
+}
+
+#[test]
+fn test_fd_receive_sf_aborts_reception() {
+    let a: Vec<u8> = (0u8..125).collect();
+    let frames = vec![
+        fd_ff(125, &a),
+        fd_sf(&[0xAA, 0xBB, 0xCC]),
+        fd_cf(1, &a[62..]),
+    ];
+    let mut ch = IsoTpFdChannel::new(FdMockChannel::new(frames), default_config());
+    assert_eq!(ch.receive().unwrap(), vec![0xAA, 0xBB, 0xCC]);
+}
+
+#[test]
+fn test_fd_receive_ff_replaces_partial_message() {
+    let a: Vec<u8> = (0u8..125).collect();
+    let b: Vec<u8> = (100u8..225).collect();
+    let frames = vec![fd_ff(125, &a), fd_ff(125, &b), fd_cf(1, &b[62..])];
+    let mut ch = IsoTpFdChannel::new(FdMockChannel::new(frames), default_config());
+    assert_eq!(ch.receive().unwrap(), b);
+}
+
+#[test]
+fn test_fd_receive_ff_restarts_reception() {
+    // As test_receive_ff_restarts_reception: FF 62 bytes, CFs 63 each.
+    let a: Vec<u8> = (0u8..200).collect();
+    let b: Vec<u8> = (50u8..238).collect();
+    let frames = vec![
+        fd_ff(200, &a),
+        fd_cf(1, &a[62..125]),
+        fd_ff(188, &b),
+        fd_cf(1, &b[62..125]),
+        fd_cf(2, &b[125..]),
+    ];
+    let cfg = IsoTpConfig {
+        block_size: 2,
+        ..default_config()
+    };
+    let mut ch = IsoTpFdChannel::new(FdMockChannel::new(frames), cfg);
+    assert_eq!(ch.receive().unwrap(), b);
+    let inner = ch.into_inner();
+    assert_eq!(inner.tx_frames.len(), 2);
+    assert!(inner.tx_frames.iter().all(|f| f.data()[0] == 0x30));
 }

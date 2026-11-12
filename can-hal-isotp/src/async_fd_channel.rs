@@ -132,7 +132,7 @@ where
         .await
         .map_err(|_| IsoTpError::Timeout)??;
 
-        let Some(total_len) = total_len else {
+        let Some(mut total_len) = total_len else {
             return Ok(collected);
         };
 
@@ -167,31 +167,47 @@ where
             let parsed = IsoTpFrame::parse(cf_frame.data(), overhead)
                 .map_err(|_| IsoTpError::InvalidFrame)?;
 
-            if let IsoTpFrame::ConsecutiveFrame { sn, data } = parsed {
-                if sn != expected_sn {
-                    return Err(IsoTpError::SequenceError {
-                        expected: expected_sn,
-                        got: sn,
-                    });
+            match parsed {
+                IsoTpFrame::ConsecutiveFrame { sn, data } => {
+                    if sn != expected_sn {
+                        return Err(IsoTpError::SequenceError {
+                            expected: expected_sn,
+                            got: sn,
+                        });
+                    }
+
+                    let bytes_needed = total_len - collected.len();
+                    let take = data.len().min(bytes_needed);
+                    collected.extend_from_slice(&data[..take]);
+
+                    expected_sn = (expected_sn + 1) & 0x0F;
+                    block_count += 1;
+
+                    if self.config.block_size > 0
+                        && block_count >= u16::from(self.config.block_size)
+                        && collected.len() < total_len
+                    {
+                        self.send_fc(FcFlag::ContinueToSend).await?;
+                        block_count = 0;
+                    }
                 }
-
-                let bytes_needed = total_len - collected.len();
-                let take = data.len().min(bytes_needed);
-                collected.extend_from_slice(&data[..take]);
-
-                expected_sn = (expected_sn + 1) & 0x0F;
-                block_count += 1;
-
-                if self.config.block_size > 0
-                    && block_count >= u16::from(self.config.block_size)
-                    && collected.len() < total_len
-                {
+                // ISO 15765-2 (unexpected N_PDU): an SF or FF that arrives
+                // during a reception ends it. The partial message is dropped,
+                // and the new frame is handled as the start of a new reception.
+                IsoTpFrame::SingleFrame { data } => return Ok(data.to_vec()),
+                IsoTpFrame::FirstFrame {
+                    total_len: new_len,
+                    data,
+                } => {
+                    total_len = new_len;
+                    collected.clear();
+                    collected.extend_from_slice(data);
                     self.send_fc(FcFlag::ContinueToSend).await?;
+                    expected_sn = 1;
                     block_count = 0;
                 }
-            } else {
-                // Per ISO 15765-2, unexpected PCI types during
-                // CF reassembly are silently ignored.
+                // An FC is meant for a sender; a receiver ignores it.
+                IsoTpFrame::FlowControl { .. } => {}
             }
         }
 
