@@ -607,27 +607,6 @@ async fn test_async_fd_receive_each_cf_restarts_n_cr() {
 // Frames on rx_id that aren't valid N_PDUs are ignored (see tests.rs).
 // ---------------------------------------------------------------------------
 
-/// Payloads that fail to parse as an ISO-TP frame with normal addressing.
-const INVALID_PDUS: &[&[u8]] = &[
-    &[],                          // no PCI byte
-    &[0x40, 0x01, 0x02],          // PCI type 0x4 (unknown)
-    &[0xF0],                      // PCI type 0xF (unknown)
-    &[0x10],                      // FF without its length byte
-    &[0x10, 0x00, 0x00, 0x00],    // long FF without its 32-bit length
-    &[0x3F, 0x00, 0x00],          // FC with flow status 0xF
-    &[0x30, 0x00],                // FC without STmin
-    &[0x00, 0x00],                // escape SF with SF_DL 0
-    &[0x08, 1, 2, 3, 4, 5, 6, 7], // SF_DL 8 in an 8-byte frame
-];
-
-fn invalid_frames() -> Vec<CanFrame> {
-    INVALID_PDUS.iter().map(|d| can_frame(rx_id(), d)).collect()
-}
-
-fn invalid_fd_frames() -> Vec<Frame> {
-    INVALID_PDUS.iter().map(|d| fd_frame(d)).collect()
-}
-
 /// Check that `receive()` ignores `junk`, both while idle and mid-message: it
 /// sends no FC for it and returns the message around it.
 async fn assert_receive_ignores(junk: &[CanFrame]) {
@@ -756,4 +735,19 @@ async fn test_async_fd_receive_cuts_ff_payload_to_ff_dl() {
     let mock = AsyncFdMockChannel::new([fd_ff(61, &carried)]);
     let mut isotp = AsyncIsoTpFdChannel::new(mock, default_config());
     assert_eq!(isotp.receive().await.unwrap(), carried[..61]);
+}
+
+// ---------------------------------------------------------------------------
+// Single Frame forms: an SF in the wrong form for its frame length is
+// ignored (see tests.rs).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_async_receive_ignores_escape_sf_in_classic_frame() {
+    assert_receive_ignores(&[classic_escape_sf()]).await;
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_ignores_sf_in_wrong_form() {
+    assert_fd_receive_ignores(&fd_wrong_form_sfs()).await;
 }

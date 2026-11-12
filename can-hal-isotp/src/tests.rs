@@ -11,7 +11,8 @@ use crate::error::IsoTpError;
 use crate::fd_channel::IsoTpFdChannel;
 use crate::frame::IsoTpFrame;
 use crate::frame::{
-    build_cf, build_cf_fd, build_ff, build_ff_fd, build_sf_fd, interpret_st_min, next_fd_dlc,
+    build_cf, build_cf_fd, build_ff, build_ff_fd, build_sf, build_sf_fd, interpret_st_min,
+    next_fd_dlc,
 };
 
 // ---------------------------------------------------------------------------
@@ -775,7 +776,7 @@ fn test_fd_send_honors_reserved_st_min_as_127ms() {
 // ---------------------------------------------------------------------------
 
 /// Payloads that fail to parse as an ISO-TP frame with normal addressing.
-const INVALID_PDUS: &[&[u8]] = &[
+pub const INVALID_PDUS: &[&[u8]] = &[
     &[],                          // no PCI byte
     &[0x40, 0x01, 0x02],          // PCI type 0x4 (unknown)
     &[0xF0],                      // PCI type 0xF (unknown)
@@ -783,18 +784,18 @@ const INVALID_PDUS: &[&[u8]] = &[
     &[0x10, 0x00, 0x00, 0x00],    // long FF without its 32-bit length
     &[0x3F, 0x00, 0x00],          // FC with flow status 0xF
     &[0x30, 0x00],                // FC without STmin
-    &[0x00, 0x00],                // escape SF with SF_DL 0
+    &[0x00, 0x00],                // nibble-form SF with SF_DL 0
     &[0x08, 1, 2, 3, 4, 5, 6, 7], // SF_DL 8 in an 8-byte frame
 ];
 
-fn invalid_frames() -> Vec<CanFrame> {
+pub fn invalid_frames() -> Vec<CanFrame> {
     INVALID_PDUS
         .iter()
         .map(|d| make_frame(rx_id(), d))
         .collect()
 }
 
-fn invalid_fd_frames() -> Vec<Frame> {
+pub fn invalid_fd_frames() -> Vec<Frame> {
     INVALID_PDUS.iter().map(|d| fd_frame(d)).collect()
 }
 
@@ -1029,4 +1030,127 @@ fn test_fd_receive_cuts_ff_payload_to_ff_dl() {
         default_config(),
     );
     assert_eq!(ch.receive().unwrap(), carried[..61]);
+}
+
+// ---------------------------------------------------------------------------
+// Single Frame forms, as in the Linux kernel (isotp_rcv): a frame of up to
+// 8 bytes carries SF_DL in the PCI's low nibble, and a CAN FD frame longer
+// than that uses the escape form (nibble 0, SF_DL in the next byte). An SF
+// in the other form is ignored.
+// ---------------------------------------------------------------------------
+
+/// The payload `parse` finds in an SF, or `None` if it rejects it.
+fn parse_sf(raw: &[u8], overhead: usize) -> Option<Vec<u8>> {
+    match IsoTpFrame::parse(raw, overhead) {
+        Ok(IsoTpFrame::SingleFrame { data }) => Some(data.to_vec()),
+        Ok(other) => panic!("{raw:02X?} parsed as {other:?}"),
+        Err(_) => None,
+    }
+}
+
+/// An SF escape-form PDU (`[00, len, data..]`) in a buffer of `frame_len` bytes.
+#[allow(clippy::cast_possible_truncation)]
+fn escape_sf(frame_len: usize, data: &[u8]) -> Vec<u8> {
+    let mut f = vec![0xCC; frame_len];
+    f[0] = 0x00;
+    f[1] = data.len() as u8;
+    f[2..2 + data.len()].copy_from_slice(data);
+    f
+}
+
+#[test]
+fn test_parse_sf_escape_form_needs_fd_frame_over_8_bytes() {
+    let abc = [0xAA, 0xBB, 0xCC];
+    // Escape form in frames of 8 bytes or fewer: ignored.
+    assert_eq!(parse_sf(&escape_sf(5, &abc), 0), None);
+    assert_eq!(parse_sf(&escape_sf(8, &abc), 0), None);
+    assert_eq!(parse_sf(&[0xF1, 0x00, 0x03, 0xAA, 0xBB, 0xCC], 1), None);
+    // Escape form in longer FD frames.
+    let ten: Vec<u8> = (1..=10).collect();
+    assert_eq!(parse_sf(&escape_sf(12, &ten), 0), Some(ten));
+    let max: Vec<u8> = (0..62).collect();
+    assert_eq!(parse_sf(&escape_sf(64, &max), 0), Some(max));
+    let mut too_long = escape_sf(64, &[0; 62]);
+    too_long[1] = 63;
+    assert_eq!(parse_sf(&too_long, 0), None);
+    assert_eq!(parse_sf(&escape_sf(12, &[]), 0), None);
+    let mut ext = vec![0xF1];
+    ext.extend(escape_sf(63, &[7; 61]));
+    assert_eq!(parse_sf(&ext, 1), Some(vec![7; 61]));
+}
+
+#[test]
+fn test_parse_sf_nibble_form_needs_frame_of_8_bytes_or_fewer() {
+    assert_eq!(
+        parse_sf(&[0x03, 0xAA, 0xBB, 0xCC], 0),
+        Some(vec![0xAA, 0xBB, 0xCC])
+    );
+    let mut padded = [0xCCu8; 8];
+    padded[..4].copy_from_slice(&[0x03, 0xAA, 0xBB, 0xCC]);
+    assert_eq!(parse_sf(&padded, 0), Some(vec![0xAA, 0xBB, 0xCC]));
+    // The same PDU padded to a 12-byte FD frame: ignored.
+    let mut fd = [0xCCu8; 12];
+    fd[..4].copy_from_slice(&[0x03, 0xAA, 0xBB, 0xCC]);
+    assert_eq!(parse_sf(&fd, 0), None);
+}
+
+// An escape-form SF needs a second PCI byte for SF_DL; with the addressing
+// overhead taking all but one byte of the frame, there is none.
+#[test]
+fn test_parse_escape_sf_without_its_sf_dl_byte() {
+    assert!(matches!(
+        IsoTpFrame::parse(&[0u8; 12], 11),
+        Err(IsoTpError::InvalidFrame)
+    ));
+}
+
+#[test]
+fn test_parse_accepts_every_sf_we_build() {
+    for overhead in 0..=1 {
+        for len in 1..=7 - overhead {
+            let data: Vec<u8> = (0u8..).take(len).collect();
+            let mut buf = [0xCCu8; 8];
+            buf[0] = 0xF1;
+            let n = build_sf(&mut buf, &data, overhead);
+            assert_eq!(parse_sf(&buf[..n], overhead).as_ref(), Some(&data));
+            assert_eq!(parse_sf(&buf, overhead).as_ref(), Some(&data));
+        }
+        for len in 1..=62 - overhead {
+            let data: Vec<u8> = (0u8..).take(len).collect();
+            let mut buf = [0xCCu8; 64];
+            buf[0] = 0xF1;
+            let n = build_sf_fd(&mut buf, &data, overhead);
+            let frame = &buf[..next_fd_dlc(n)];
+            assert_eq!(
+                parse_sf(frame, overhead).as_ref(),
+                Some(&data),
+                "FD SF of {len} bytes, overhead {overhead}"
+            );
+        }
+    }
+}
+
+/// A classic escape-form SF carrying [AA BB CC]: invalid in 5 bytes.
+pub fn classic_escape_sf() -> CanFrame {
+    make_frame(rx_id(), &[0x00, 0x03, 0xAA, 0xBB, 0xCC])
+}
+
+#[test]
+fn test_receive_ignores_escape_sf_in_classic_frame() {
+    assert_receive_ignores(&[classic_escape_sf()]);
+}
+
+/// SFs in the wrong form for their FD frame length, each carrying [AA BB CC].
+pub fn fd_wrong_form_sfs() -> Vec<Frame> {
+    vec![
+        // Escape form in a 5-byte FD frame.
+        fd_frame(&[0x00, 0x03, 0xAA, 0xBB, 0xCC]),
+        // Nibble form in a 12-byte FD frame.
+        fd_frame(&[0x03, 0xAA, 0xBB, 0xCC, 0, 0, 0, 0, 0]),
+    ]
+}
+
+#[test]
+fn test_fd_receive_ignores_sf_in_wrong_form() {
+    assert_fd_receive_ignores(&fd_wrong_form_sfs());
 }

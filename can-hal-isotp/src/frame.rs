@@ -53,26 +53,24 @@ impl<'a> IsoTpFrame<'a> {
         match frame_type {
             // Single Frame
             0x0 => {
-                let sf_dl = (pci[0] & 0x0F) as usize;
-                if sf_dl == 0 {
-                    // FD Single Frame: 2-byte PCI [0x00, DL]
-                    if pci.len() < 2 || pci[1] == 0 {
-                        return Err(IsoTpError::InvalidFrame);
-                    }
-                    let fd_dl = pci[1] as usize;
-                    if overhead + 2 + fd_dl > raw.len() {
-                        return Err(IsoTpError::InvalidFrame);
-                    }
-                    let data = &raw[overhead + 2..overhead + 2 + fd_dl];
-                    Ok(IsoTpFrame::SingleFrame { data })
-                } else {
-                    // Classic SF: 1-byte PCI
-                    if sf_dl > 7 || overhead + 1 + sf_dl > raw.len() {
-                        return Err(IsoTpError::InvalidFrame);
-                    }
-                    let data = &raw[overhead + 1..overhead + 1 + sf_dl];
-                    Ok(IsoTpFrame::SingleFrame { data })
+                // As in the Linux kernel (isotp_rcv): a frame of up to 8
+                // bytes holds SF_DL in the PCI's low nibble, and a CAN FD
+                // frame longer than that uses the escape form, a zero nibble
+                // with SF_DL in the next byte. Either form in the other kind
+                // of frame is invalid.
+                let (pci_len, sf_dl) = match (raw.len() <= 8, pci[0] & 0x0F, pci.get(1)) {
+                    (true, nibble, _) => (1, nibble),
+                    (false, 0, Some(&sf_dl)) => (2, sf_dl),
+                    (false, _, _) => return Err(IsoTpError::InvalidFrame),
+                };
+                let start = overhead + pci_len;
+                let end = start + usize::from(sf_dl);
+                if sf_dl == 0 || end > raw.len() {
+                    return Err(IsoTpError::InvalidFrame);
                 }
+                Ok(IsoTpFrame::SingleFrame {
+                    data: &raw[start..end],
+                })
             }
             // First Frame
             0x1 => {
