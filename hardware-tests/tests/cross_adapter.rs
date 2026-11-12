@@ -485,6 +485,93 @@ fn test_pcan_hardware_filter_blocks_non_matching() {
 }
 
 // ---------------------------------------------------------------------------
+// Filters and frame types: a filter matches frames of its own ID type only, so
+// a type with no filter in the set is rejected. The frames to drop go first,
+// and the receiver reads with try_receive until it returns None, so a backend
+// that drops a frame must go on to the next one rather than report an empty
+// queue.
+// ---------------------------------------------------------------------------
+
+/// Read everything `channel` has queued, until try_receive returns None.
+fn try_receive_all<C: Receive>(channel: &mut C) -> Vec<CanId> {
+    let mut ids = Vec::new();
+    while let Some(ts) = channel.try_receive().expect("try_receive") {
+        ids.push(ts.into_frame().id());
+    }
+    ids
+}
+
+fn open_pcan_classic() -> can_hal_pcan::PcanChannel<can_hal_pcan::Classic> {
+    can_hal_pcan::PcanDriver::new()
+        .unwrap()
+        .channel(0)
+        .unwrap()
+        .classic(ClassicBitrate::Br500K)
+        .connect()
+        .unwrap()
+}
+
+fn open_kvaser_classic() -> can_hal_kvaser::KvaserChannel<can_hal_kvaser::Classic> {
+    can_hal_kvaser::KvaserDriver::new()
+        .unwrap()
+        .channel(0)
+        .classic(500_000)
+        .unwrap()
+        .connect()
+        .unwrap()
+}
+
+fn send_all<T: Transmit>(tx: &mut T, ids: &[CanId]) {
+    for (i, &id) in (0u8..).zip(ids) {
+        tx.transmit(&CanFrame::new(id, &[i]).unwrap())
+            .unwrap_or_else(|e| panic!("transmit {id:?}: {e}"));
+    }
+    // Let the last frame reach the receiver's queue.
+    thread::sleep(Duration::from_millis(200));
+}
+
+#[test]
+fn test_kvaser_standard_filter_blocks_extended() {
+    let std_id = CanId::new_standard(0x200).unwrap();
+    let mut kvaser = open_kvaser_classic();
+    kvaser
+        .set_filters(&[Filter::new(std_id, 0x7FF)])
+        .expect("set_filters failed");
+    let mut pcan = open_pcan_classic();
+    send_all(
+        &mut pcan,
+        &[
+            CanId::new_extended(0x200).unwrap(),
+            CanId::new_extended(0x1234_5200).unwrap(),
+            CanId::new_extended(0x1FFF_FFFF).unwrap(),
+            std_id,
+        ],
+    );
+    let received = try_receive_all(&mut kvaser);
+    assert_eq!(received, [std_id], "a standard filter passed {received:?}");
+}
+
+#[test]
+fn test_kvaser_extended_filter_blocks_standard() {
+    let ext_id = CanId::new_extended(0x200).unwrap();
+    let mut kvaser = open_kvaser_classic();
+    kvaser
+        .set_filters(&[Filter::new(ext_id, 0x1FFF_FFFF)])
+        .expect("set_filters failed");
+    let mut pcan = open_pcan_classic();
+    send_all(
+        &mut pcan,
+        &[
+            CanId::new_standard(0x200).unwrap(),
+            CanId::new_standard(0x7FF).unwrap(),
+            ext_id,
+        ],
+    );
+    let received = try_receive_all(&mut kvaser);
+    assert_eq!(received, [ext_id], "an extended filter passed {received:?}");
+}
+
+// ---------------------------------------------------------------------------
 // classic_explicit smoke - Kvaser's classic_explicit path skips the solver
 // and goes directly to canSetBusParams with the user-supplied segments. We
 // reproduce the solver's 500K nominal output (tseg1=13, tseg2=6, sjw=4) and

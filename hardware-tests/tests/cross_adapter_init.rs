@@ -230,6 +230,67 @@ fn test_pcan_fd_hardware_filter_blocks_non_matching() {
     );
 }
 
+// FD frames under a filter of the other ID type, read with try_receive_fd
+// until it returns None (see the classic tests in cross_adapter.rs).
+
+/// Read everything `channel` has queued, until try_receive_fd returns None.
+fn try_receive_all_fd<C: ReceiveFd>(channel: &mut C) -> Vec<CanId> {
+    let mut ids = Vec::new();
+    while let Some(ts) = channel.try_receive_fd().expect("try_receive_fd") {
+        ids.push(ts.into_frame().id());
+    }
+    ids
+}
+
+fn open_pcan_fd() -> can_hal_pcan::PcanChannel<can_hal_pcan::Fd> {
+    can_hal_pcan::PcanDriver::new()
+        .unwrap()
+        .channel(0)
+        .unwrap()
+        .fd(500_000, 4_000_000)
+        .unwrap()
+        .connect()
+        .unwrap()
+}
+
+fn open_kvaser_fd() -> can_hal_kvaser::KvaserChannel<can_hal_kvaser::Fd> {
+    can_hal_kvaser::KvaserDriver::new()
+        .unwrap()
+        .channel(0)
+        .fd(500_000, 4_000_000)
+        .unwrap()
+        .connect()
+        .unwrap()
+}
+
+fn send_all_fd<T: TransmitFd>(tx: &mut T, ids: &[CanId]) {
+    for &id in ids {
+        tx.transmit_fd(&CanFdFrame::new(id, &[0x5A; 12], true, false).unwrap())
+            .unwrap_or_else(|e| panic!("transmit {id:?}: {e}"));
+    }
+    thread::sleep(Duration::from_millis(200));
+}
+
+#[test]
+fn test_kvaser_fd_standard_filter_blocks_extended() {
+    let std_id = CanId::new_standard(0x200).unwrap();
+    let mut kvaser = open_kvaser_fd();
+    kvaser
+        .set_filters(&[Filter::new(std_id, 0x7FF)])
+        .expect("set_filters failed");
+    let mut pcan = open_pcan_fd();
+    send_all_fd(
+        &mut pcan,
+        &[
+            CanId::new_extended(0x200).unwrap(),
+            CanId::new_extended(0x1234_5200).unwrap(),
+            std_id,
+        ],
+    );
+    let received = try_receive_all_fd(&mut kvaser);
+    assert_eq!(received, [std_id], "a standard filter passed {received:?}");
+}
+
 // ---------------------------------------------------------------------------
 // Extended (29-bit) IDs in FD mode (the existing extended-ID tests are classic).
 // ---------------------------------------------------------------------------
