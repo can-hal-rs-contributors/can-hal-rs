@@ -97,11 +97,16 @@ jobs:
           msrv=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
           test -n "$msrv"
           echo "MSRV=$msrv" >> "$GITHUB_ENV"
-      - run: rustup toolchain install "$MSRV" --profile minimal --target x86_64-pc-windows-gnu
+      - run: rustup toolchain install "$MSRV" --profile minimal --target x86_64-pc-windows-gnu,thumbv7em-none-eabihf
       - name: Check on Linux
         run: cargo +"$MSRV" check --workspace --all-targets --all-features
+      # thumbv7em has no std, so any use of it fails to build. can-hal-isotp
+      # needs std, and would turn on can-hal-rs's default std feature, so it
+      # is left out.
       - name: Check without std
-        run: cargo +"$MSRV" check -p can-hal-rs -p can-hal-isotp --no-default-features
+        run: |
+          cargo +"$MSRV" check -p can-hal-rs --no-default-features --target thumbv7em-none-eabihf
+          cargo +"$MSRV" check -p can-hal-rs --no-default-features --features async --target thumbv7em-none-eabihf
       # The SocketCAN crates, and the ISO-TP examples that use them, build on
       # Linux only.
       - name: Check on Windows
