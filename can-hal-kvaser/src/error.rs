@@ -44,11 +44,16 @@ pub enum KvaserError {
     Canlib(KvaserStatus),
     /// A frame could not be constructed from the received data.
     InvalidFrame(String),
-    /// A bitrate (in Hz) does not evenly divide the 80 MHz CANlib clock,
-    /// so no exact prescaler exists.
+    /// A bitrate (in Hz) is zero or doesn't evenly divide the controller
+    /// clock (the device's, as CANlib reports it, or the 80 MHz
+    /// [`FALLBACK_CLOCK_HZ`](crate::FALLBACK_CLOCK_HZ) when it doesn't), so
+    /// no exact prescaler exists.
     UnsupportedBitrate(u32),
-    /// No timing parameters satisfy the requested bitrate + sample point
-    /// at the 80 MHz CANlib clock within the segment-length constraints.
+    /// The timing can't be realized: no solver timing meets the bitrate and
+    /// sample point within the segment and prescaler limits, or explicit
+    /// [`BusParams`](crate::BusParams) / [`BusParamsFd`](crate::BusParamsFd)
+    /// values are out of range or don't give an integer prescaler in
+    /// `[1, 1024]`.
     UnsupportedTiming(String),
     /// A platform-specific error occurred.
     Platform(String),
