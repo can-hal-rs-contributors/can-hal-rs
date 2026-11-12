@@ -148,7 +148,7 @@ pub fn from_pcan_msg_fd(msg: &TPCANMsgFD) -> Result<Option<Frame>, PcanError> {
 }
 
 // ---------------------------------------------------------------------------
-// DLC encoding / decoding
+// DLC decoding
 // ---------------------------------------------------------------------------
 
 /// Convert a CAN FD DLC code (0–15) to a byte count.

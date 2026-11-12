@@ -61,7 +61,8 @@ pub enum PcanError {
     LibraryLoad(libloading::Error),
     /// A PCAN-Basic API call returned a non-OK status.
     Pcan(PcanStatus),
-    /// Failed to construct a frame (invalid ID, data length, etc.).
+    /// Failed to construct a frame (invalid ID, data length, etc.), or to
+    /// pass the FD timing string to PCAN-Basic.
     InvalidFrame(String),
     /// The requested channel index does not map to a known PCAN handle.
     InvalidChannel(u32),

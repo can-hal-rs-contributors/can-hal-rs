@@ -486,9 +486,14 @@ const fn bus_state_from_status(status: u32) -> Result<BusState, PcanError> {
     } else if status & ffi::PCAN_ERROR_BUSOFF != 0 {
         Ok(BusState::BusOff)
     } else if status & ffi::PCAN_ERROR_BUSPASSIVE != 0 || status & ffi::PCAN_ERROR_BUSHEAVY != 0 {
+        // libpcanbasic on Linux reports error passive as BUSHEAVY (plus
+        // BUSPASSIVE on an FD channel) and the warning limit as BUSLIGHT.
+        // PCANBasic.h names BUSHEAVY the warning limit, so where PCAN-Basic
+        // reports it that way, the warning limit reads as ErrorPassive, as it
+        // does on Kvaser.
         Ok(BusState::ErrorPassive)
     } else {
-        // PCAN_ERROR_OK or PCAN_ERROR_BUSLIGHT → ErrorActive
+        // PCAN_ERROR_OK or PCAN_ERROR_BUSLIGHT
         Ok(BusState::ErrorActive)
     }
 }
