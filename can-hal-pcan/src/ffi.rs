@@ -11,13 +11,19 @@ use std::os::raw::c_char;
 // Handle constants
 // ---------------------------------------------------------------------------
 
-/// First USB channel handle.
+/// First USB channel handle (USB channels 1-8 are 0x51-0x58).
 pub const PCAN_USBBUS1: u16 = 0x51;
 
-/// First PCI channel handle.
+/// Ninth USB channel handle (USB channels 9-16 are 0x509-0x510).
+pub const PCAN_USBBUS9: u16 = 0x509;
+
+/// First PCI channel handle (PCI channels 1-8 are 0x41-0x48).
 pub const PCAN_PCIBUS1: u16 = 0x41;
 
-/// First LAN channel handle.
+/// Ninth PCI channel handle (PCI channels 9-16 are 0x409-0x410).
+pub const PCAN_PCIBUS9: u16 = 0x409;
+
+/// First LAN channel handle (LAN channels 1-16 are 0x801-0x810).
 pub const PCAN_LANBUS1: u16 = 0x801;
 
 /// Map a (bus_type, 0-based index) pair to a PCAN handle value.
@@ -29,8 +35,10 @@ pub const fn pcan_handle(bus_type: u8, index: u16) -> Option<u16> {
         return None;
     }
     match bus_type {
-        0 => Some(PCAN_USBBUS1 + index),
-        1 => Some(PCAN_PCIBUS1 + index),
+        0 if index < 8 => Some(PCAN_USBBUS1 + index),
+        0 => Some(PCAN_USBBUS9 + (index - 8)),
+        1 if index < 8 => Some(PCAN_PCIBUS1 + index),
+        1 => Some(PCAN_PCIBUS9 + (index - 8)),
         2 => Some(PCAN_LANBUS1 + index),
         _ => None,
     }
@@ -188,18 +196,25 @@ pub type FnSetValue =
 mod tests {
     use super::*;
 
+    // PCANBasic.h numbers USB and PCI channels 1-8 from 0x51 / 0x41, and
+    // channels 9-16 from 0x509 / 0x409.
     #[test]
     fn usb_handle_mapping() {
         assert_eq!(pcan_handle(0, 0), Some(PCAN_USBBUS1));
         assert_eq!(pcan_handle(0, 1), Some(PCAN_USBBUS1 + 1));
-        assert_eq!(pcan_handle(0, 15), Some(PCAN_USBBUS1 + 15));
+        assert_eq!(pcan_handle(0, 7), Some(0x58));
+        assert_eq!(pcan_handle(0, 8), Some(0x509));
+        assert_eq!(pcan_handle(0, 15), Some(0x510));
         assert_eq!(pcan_handle(0, 16), None);
     }
 
     #[test]
     fn pci_handle_mapping() {
         assert_eq!(pcan_handle(1, 0), Some(PCAN_PCIBUS1));
-        assert_eq!(pcan_handle(1, 15), Some(PCAN_PCIBUS1 + 15));
+        assert_eq!(pcan_handle(1, 7), Some(0x48));
+        assert_eq!(pcan_handle(1, 8), Some(0x409));
+        assert_eq!(pcan_handle(1, 15), Some(0x410));
+        assert_eq!(pcan_handle(1, 16), None);
     }
 
     #[test]
