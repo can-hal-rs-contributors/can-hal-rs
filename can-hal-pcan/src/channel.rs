@@ -17,7 +17,7 @@ use can_hal::filter::{Filter, Filterable};
 use can_hal::frame::{CanFdFrame, CanFrame, Frame, Timestamped};
 
 use crate::convert;
-use crate::error::{check_status, PcanError};
+use crate::error::{check_status, PcanError, PcanStatus};
 use crate::event::ReceiveEvent;
 use crate::ffi;
 use crate::library::PcanLibrary;
@@ -357,16 +357,7 @@ impl<Mode> BusStatus for PcanChannel<Mode> {
     fn bus_state(&self) -> Result<BusState, Self::Error> {
         // SAFETY: get_status() was loaded from PCANBasic and self.handle is valid.
         let status = unsafe { (self.lib.get_status)(self.handle) };
-
-        if status & ffi::PCAN_ERROR_BUSOFF != 0 {
-            Ok(BusState::BusOff)
-        } else if status & ffi::PCAN_ERROR_BUSPASSIVE != 0 || status & ffi::PCAN_ERROR_BUSHEAVY != 0
-        {
-            Ok(BusState::ErrorPassive)
-        } else {
-            // PCAN_ERROR_OK or PCAN_ERROR_BUSLIGHT → ErrorActive
-            Ok(BusState::ErrorActive)
-        }
+        bus_state_from_status(status)
     }
 
     fn error_counters(&self) -> Result<ErrorCounters, Self::Error> {
@@ -413,10 +404,90 @@ impl<Mode> BusStatus for PcanChannel<Mode> {
     }
 }
 
+/// Map a `CAN_GetStatus` result to a [`BusState`].
+///
+/// The bus flags give the state. The transmit and receive queue flags say
+/// nothing about it, so they're ignored. Any other status (e.g.
+/// `PCAN_ERROR_ILLHW` for an unplugged adapter, or `PCAN_ERROR_INITIALIZE`)
+/// means there's no bus state to read, and is returned as an error.
+const fn bus_state_from_status(status: u32) -> Result<BusState, PcanError> {
+    const BUS_FLAGS: u32 = ffi::PCAN_ERROR_BUSLIGHT
+        | ffi::PCAN_ERROR_BUSHEAVY
+        | ffi::PCAN_ERROR_BUSPASSIVE
+        | ffi::PCAN_ERROR_BUSOFF;
+    const QUEUE_FLAGS: u32 = ffi::PCAN_ERROR_XMTFULL
+        | ffi::PCAN_ERROR_OVERRUN
+        | ffi::PCAN_ERROR_QRCVEMPTY
+        | ffi::PCAN_ERROR_QOVERRUN
+        | ffi::PCAN_ERROR_QXMTFULL;
+
+    if status & !(BUS_FLAGS | QUEUE_FLAGS) != 0 {
+        Err(PcanError::Pcan(PcanStatus(status)))
+    } else if status & ffi::PCAN_ERROR_BUSOFF != 0 {
+        Ok(BusState::BusOff)
+    } else if status & ffi::PCAN_ERROR_BUSPASSIVE != 0 || status & ffi::PCAN_ERROR_BUSHEAVY != 0 {
+        Ok(BusState::ErrorPassive)
+    } else {
+        // PCAN_ERROR_OK or PCAN_ERROR_BUSLIGHT → ErrorActive
+        Ok(BusState::ErrorActive)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use can_hal::id::CanId;
+
+    #[test]
+    fn bus_state_from_bus_flags() {
+        assert_eq!(
+            bus_state_from_status(ffi::PCAN_ERROR_OK).unwrap(),
+            BusState::ErrorActive
+        );
+        assert_eq!(
+            bus_state_from_status(ffi::PCAN_ERROR_BUSLIGHT).unwrap(),
+            BusState::ErrorActive
+        );
+        assert_eq!(
+            bus_state_from_status(ffi::PCAN_ERROR_BUSHEAVY).unwrap(),
+            BusState::ErrorPassive
+        );
+        assert_eq!(
+            bus_state_from_status(ffi::PCAN_ERROR_BUSPASSIVE).unwrap(),
+            BusState::ErrorPassive
+        );
+        assert_eq!(
+            bus_state_from_status(ffi::PCAN_ERROR_BUSOFF).unwrap(),
+            BusState::BusOff
+        );
+        // Queue flags don't change the state.
+        assert_eq!(
+            bus_state_from_status(ffi::PCAN_ERROR_BUSOFF | ffi::PCAN_ERROR_QOVERRUN).unwrap(),
+            BusState::BusOff
+        );
+    }
+
+    // CAN_GetStatus returns these instead of a bus state when it can't read
+    // one: the adapter was unplugged, the handle is invalid, or the channel
+    // isn't initialized.
+    #[test]
+    fn bus_state_from_failed_status_is_an_error() {
+        for status in [
+            ffi::PCAN_ERROR_ILLHW,
+            ffi::PCAN_ERROR_ILLHANDLE,
+            ffi::PCAN_ERROR_INITIALIZE,
+            ffi::PCAN_ERROR_NODRIVER,
+        ] {
+            assert!(
+                matches!(
+                    bus_state_from_status(status),
+                    Err(PcanError::Pcan(PcanStatus(s))) if s == status
+                ),
+                "status 0x{status:X} must be an error, got {:?}",
+                bus_state_from_status(status)
+            );
+        }
+    }
 
     #[test]
     fn mask_to_range_exact_standard() {
