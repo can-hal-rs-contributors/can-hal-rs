@@ -602,3 +602,75 @@ async fn test_async_fd_receive_each_cf_restarts_n_cr() {
     let mut isotp = AsyncIsoTpFdChannel::new(mock, n_cr_config());
     assert_eq!(isotp.receive().await.unwrap(), a);
 }
+
+// ---------------------------------------------------------------------------
+// Frames on rx_id that aren't valid N_PDUs are ignored (see tests.rs).
+// ---------------------------------------------------------------------------
+
+/// Payloads that fail to parse as an ISO-TP frame with normal addressing.
+const INVALID_PDUS: &[&[u8]] = &[
+    &[],                          // no PCI byte
+    &[0x40, 0x01, 0x02],          // PCI type 0x4 (unknown)
+    &[0xF0],                      // PCI type 0xF (unknown)
+    &[0x10],                      // FF without its length byte
+    &[0x10, 0x00, 0x00, 0x00],    // long FF without its 32-bit length
+    &[0x3F, 0x00, 0x00],          // FC with flow status 0xF
+    &[0x30, 0x00],                // FC without STmin
+    &[0x00, 0x00],                // escape SF with SF_DL 0
+    &[0x08, 1, 2, 3, 4, 5, 6, 7], // SF_DL 8 in an 8-byte frame
+];
+
+fn invalid_frames() -> Vec<CanFrame> {
+    INVALID_PDUS.iter().map(|d| can_frame(rx_id(), d)).collect()
+}
+
+fn invalid_fd_frames() -> Vec<Frame> {
+    INVALID_PDUS.iter().map(|d| fd_frame(d)).collect()
+}
+
+/// Check that `receive()` ignores `junk`, both while idle and mid-message: it
+/// sends no FC for it and returns the message around it.
+async fn assert_receive_ignores(junk: &[CanFrame]) {
+    let mut frames = junk.to_vec();
+    frames.push(can_frame(rx_id(), &[0x02, 0x11, 0x22]));
+    let mut isotp = AsyncIsoTpChannel::new(mock_with(frames), default_config());
+    assert_eq!(isotp.receive().await.unwrap(), vec![0x11, 0x22]);
+    assert!(isotp.into_inner().tx_frames.is_empty());
+
+    let a: Vec<u8> = (0..13).collect();
+    let mut frames = vec![classic_ff(13, &a)];
+    frames.extend_from_slice(junk);
+    frames.push(classic_cf(1, &a[6..13]));
+    let mut isotp = AsyncIsoTpChannel::new(mock_with(frames), default_config());
+    assert_eq!(isotp.receive().await.unwrap(), a);
+    // Only the FF got an FC.
+    assert_eq!(isotp.into_inner().tx_frames.len(), 1);
+}
+
+/// [`assert_receive_ignores`] for the FD channel.
+async fn assert_fd_receive_ignores(junk: &[Frame]) {
+    let mut frames = junk.to_vec();
+    frames.push(fd_sf(&[0x11, 0x22]));
+    let mut isotp = AsyncIsoTpFdChannel::new(AsyncFdMockChannel::new(frames), default_config());
+    assert_eq!(isotp.receive().await.unwrap(), vec![0x11, 0x22]);
+    assert!(isotp.into_inner().tx_frames.is_empty());
+
+    let a: Vec<u8> = (0u8..125).collect();
+    let mut frames = vec![fd_ff(125, &a)];
+    frames.extend_from_slice(junk);
+    frames.push(fd_cf(1, &a[62..]));
+    let mut isotp = AsyncIsoTpFdChannel::new(AsyncFdMockChannel::new(frames), default_config());
+    assert_eq!(isotp.receive().await.unwrap(), a);
+    // Only the FF got an FC.
+    assert_eq!(isotp.into_inner().tx_frames.len(), 1);
+}
+
+#[tokio::test]
+async fn test_async_receive_ignores_invalid_frames() {
+    assert_receive_ignores(&invalid_frames()).await;
+}
+
+#[tokio::test]
+async fn test_async_fd_receive_ignores_invalid_frames() {
+    assert_fd_receive_ignores(&invalid_fd_frames()).await;
+}

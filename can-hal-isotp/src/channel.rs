@@ -158,8 +158,12 @@ where
                 continue;
             }
 
-            let isotp = IsoTpFrame::parse(can_frame.data(), overhead)
-                .map_err(|_| IsoTpError::InvalidFrame)?;
+            // ISO 15765-2 has a receiver ignore a frame that isn't a valid
+            // N_PDU (an unknown PCI type, a bad length or flow status), as the
+            // Linux kernel does.
+            let Ok(isotp) = IsoTpFrame::parse(can_frame.data(), overhead) else {
+                continue;
+            };
 
             match isotp {
                 IsoTpFrame::SingleFrame { data } => {
@@ -202,8 +206,10 @@ where
                             continue;
                         }
 
-                        let parsed = IsoTpFrame::parse(cf.data(), overhead)
-                            .map_err(|_| IsoTpError::InvalidFrame)?;
+                        // Ignored, as above; the CF deadline stands.
+                        let Ok(parsed) = IsoTpFrame::parse(cf.data(), overhead) else {
+                            continue;
+                        };
 
                         match parsed {
                             IsoTpFrame::ConsecutiveFrame { sn, data } => {
@@ -257,9 +263,8 @@ where
 
                     return Ok(result);
                 }
-                _ => {
-                    // Unexpected frame type while waiting for SF/FF; skip it
-                }
+                // A CF with no reception in progress, or an FC: ignore it.
+                _ => {}
             }
         }
     }
