@@ -19,9 +19,10 @@ use crate::library::PcanLibrary;
 
 /// An opaque handle to a platform-specific receive event.
 ///
-/// Created by [`PcanChannel`](crate::channel::PcanChannel) during
-/// initialization. The event is used to efficiently block until a CAN message
-/// is available, avoiding busy-wait polling.
+/// Created by `driver::finalize_channel` when a channel is opened, and owned
+/// by the [`PcanChannel`](crate::channel::PcanChannel). The event is used to
+/// efficiently block until a CAN message is available, avoiding busy-wait
+/// polling.
 pub struct ReceiveEvent {
     lib: Arc<PcanLibrary>,
     handle: u16,
