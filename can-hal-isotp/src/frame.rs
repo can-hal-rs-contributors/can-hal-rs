@@ -307,7 +307,8 @@ pub fn build_fc_fd(
 ///
 /// - 0x00–0x7F: value in milliseconds (0–127 ms)
 /// - 0xF1–0xF9: 100–900 microseconds, rounded up to 1 ms (OS sleep granularity)
-/// - All other values: treated as zero delay
+/// - All other values are reserved: treated as 0x7F (127 ms), the longest
+///   valid STmin, as ISO 15765-2 has a sender do when it receives one
 pub(crate) fn interpret_st_min(st_min: u8) -> Duration {
     match st_min {
         0x00..=0x7F => Duration::from_millis(u64::from(st_min)),
@@ -315,6 +316,6 @@ pub(crate) fn interpret_st_min(st_min: u8) -> Duration {
             let us = u64::from(st_min - 0xF0) * 100;
             Duration::from_micros(us).max(Duration::from_millis(1))
         }
-        _ => Duration::ZERO,
+        _ => Duration::from_millis(127),
     }
 }

@@ -37,7 +37,7 @@ pub struct IsoTpConfig {
     /// Encoding (ISO 15765-2):
     /// - `0x00`--`0x7F`: 0--127 milliseconds
     /// - `0xF1`--`0xF9`: 100--900 microseconds
-    /// - All other values: reserved, treated as 0
+    /// - All other values: reserved, treated as 0x7F (127 ms)
     ///
     /// **Platform note**: Values in the 0xF1--0xF9 range (sub-millisecond) are rounded
     /// up to 1 ms because `std::thread::sleep` on Linux has ~1 ms granularity without

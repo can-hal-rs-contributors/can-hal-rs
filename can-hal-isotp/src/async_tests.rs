@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use can_hal::async_channel::{AsyncReceive, AsyncReceiveFd, AsyncTransmit, AsyncTransmitFd};
 use can_hal::frame::{CanFdFrame, CanFrame, Frame, Timestamped};
@@ -407,4 +407,38 @@ async fn test_async_fd_receive_ff_restarts_reception() {
     let inner = isotp.into_inner();
     assert_eq!(inner.tx_frames.len(), 2);
     assert!(inner.tx_frames.iter().all(|f| f.data()[0] == 0x30));
+}
+
+// ---------------------------------------------------------------------------
+// Reserved STmin values: the sender waits 127 ms (see tests.rs).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_async_send_honors_reserved_st_min_as_127ms() {
+    // 20 bytes = FF + 2 CFs, so one STmin gap.
+    let mock = mock_with([can_frame(rx_id(), &[0x30, 0, 0xFA])]);
+    let mut isotp = AsyncIsoTpChannel::new(mock, default_config());
+    let payload: Vec<u8> = (0..20).collect();
+    let start = Instant::now();
+    isotp.send(&payload).await.unwrap();
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(127),
+        "send() took {elapsed:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_async_fd_send_honors_reserved_st_min_as_127ms() {
+    // 126 bytes = FF (62) + CF (63) + CF (1), so one STmin gap.
+    let mock = AsyncFdMockChannel::new([fd_frame(&[0x30, 0, 0xFA])]);
+    let mut isotp = AsyncIsoTpFdChannel::new(mock, default_config());
+    let payload: Vec<u8> = (0u8..126).collect();
+    let start = Instant::now();
+    isotp.send(&payload).await.unwrap();
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(127),
+        "send() took {elapsed:?}"
+    );
 }

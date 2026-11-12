@@ -9,7 +9,9 @@ use crate::channel::IsoTpChannel;
 use crate::config::{AddressingMode, IsoTpConfig};
 use crate::error::IsoTpError;
 use crate::fd_channel::IsoTpFdChannel;
-use crate::frame::{build_cf, build_cf_fd, build_ff, build_ff_fd, build_sf_fd, next_fd_dlc};
+use crate::frame::{
+    build_cf, build_cf_fd, build_ff, build_ff_fd, build_sf_fd, interpret_st_min, next_fd_dlc,
+};
 
 // ---------------------------------------------------------------------------
 // Mock
@@ -703,4 +705,65 @@ fn test_fd_receive_ff_restarts_reception() {
     let inner = ch.into_inner();
     assert_eq!(inner.tx_frames.len(), 2);
     assert!(inner.tx_frames.iter().all(|f| f.data()[0] == 0x30));
+}
+
+// ---------------------------------------------------------------------------
+// Reserved STmin values (0x80-0xF0, 0xFA-0xFF): ISO 15765-2 has the sender
+// use the longest valid value, 0x7F (127 ms), as the Linux kernel does.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_interpret_st_min_reserved_is_127ms() {
+    for raw in (0x80..=0xF0).chain(0xFA..=0xFF) {
+        assert_eq!(
+            interpret_st_min(raw),
+            Duration::from_millis(127),
+            "STmin {raw:#04x}"
+        );
+    }
+    // The defined values are unchanged.
+    assert_eq!(interpret_st_min(0x00), Duration::ZERO);
+    assert_eq!(interpret_st_min(0x05), Duration::from_millis(5));
+    assert_eq!(interpret_st_min(0x7F), Duration::from_millis(127));
+    assert_eq!(interpret_st_min(0xF1), Duration::from_millis(1));
+    assert_eq!(interpret_st_min(0xF9), Duration::from_millis(1));
+}
+
+#[test]
+fn test_config_st_min_duration_reserved_is_127ms() {
+    let cfg = IsoTpConfig {
+        st_min: 0xFA,
+        ..default_config()
+    };
+    assert_eq!(cfg.st_min_duration(), Duration::from_millis(127));
+}
+
+#[test]
+fn test_send_honors_reserved_st_min_as_127ms() {
+    // 20 bytes = FF + 2 CFs, so one STmin gap.
+    let payload: Vec<u8> = (0..20).collect();
+    let mock = MockChannel::new(vec![fc_frame(0, 0, 0xFA)]);
+    let mut ch = IsoTpChannel::new(mock, default_config());
+    let start = Instant::now();
+    ch.send(&payload).unwrap();
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(127),
+        "send() took {elapsed:?}"
+    );
+}
+
+#[test]
+fn test_fd_send_honors_reserved_st_min_as_127ms() {
+    // 126 bytes = FF (62) + CF (63) + CF (1), so one STmin gap.
+    let payload: Vec<u8> = (0u8..126).collect();
+    let mock = FdMockChannel::new(vec![fd_frame(&[0x30, 0, 0xFA])]);
+    let mut ch = IsoTpFdChannel::new(mock, default_config());
+    let start = Instant::now();
+    ch.send(&payload).unwrap();
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(127),
+        "send() took {elapsed:?}"
+    );
 }
