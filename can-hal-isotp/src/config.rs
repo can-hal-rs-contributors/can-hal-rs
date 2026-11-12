@@ -32,22 +32,30 @@ pub struct IsoTpConfig {
     pub addressing: AddressingMode,
     /// Block Size advertised in Flow Control frames (0 = no limit).
     pub block_size: u8,
-    /// Raw STmin byte advertised in our Flow Control frames (controls sender's inter-frame gap).
+    /// Raw STmin byte this channel advertises in its Flow Control frames: the
+    /// gap it asks the peer to leave between Consecutive Frames. `send` doesn't
+    /// use it; it waits the STmin from the peer's FC instead.
     ///
     /// Encoding (ISO 15765-2):
     /// - `0x00`--`0x7F`: 0--127 milliseconds
     /// - `0xF1`--`0xF9`: 100--900 microseconds
-    /// - All other values: reserved, treated as 0x7F (127 ms)
+    /// - All other values: reserved, and not to be advertised. A sender that
+    ///   receives one waits 127 ms (`0x7F`), as `send` does.
     ///
-    /// **Platform note**: Values in the 0xF1--0xF9 range (sub-millisecond) are rounded
-    /// up to 1 ms because `std::thread::sleep` on Linux has ~1 ms granularity without
-    /// real-time scheduling (`SCHED_RR`). For strict sub-millisecond timing, the caller
-    /// must configure the thread with `SCHED_RR` before calling `send`.
+    /// `send` waits out a peer's `0xF1`--`0xF9` as 1 ms; see
+    /// [`st_min_duration`](Self::st_min_duration).
     pub st_min: u8,
-    /// Timeout for N_Bs (waiting for FC) and N_Cr (waiting for CF).
+    /// Timeout for each wait: for the first SF or FF in `receive`, for each FC
+    /// in `send` (N_Bs, which an FC(Wait) does not restart), and for each CF in
+    /// `receive` (N_Cr). A frame that is ignored doesn't restart a wait.
     pub timeout: Duration,
-    /// If `Some(byte)`, pad all transmitted CAN frames to 8 bytes with this value.
-    /// `None` means no padding (only the required bytes are sent).
+    /// Padding for transmitted frames.
+    ///
+    /// - Classic channels: `Some(b)` pads every frame to 8 bytes with `b`;
+    ///   `None` sends only the bytes in use.
+    /// - FD channels: a frame of 8 bytes or fewer is never padded; a longer one
+    ///   is always padded up to the next valid CAN FD data length (12, 16, 20,
+    ///   24, 32, 48 or 64 bytes) with `b`, or with 0x00 if `None`.
     pub padding: Option<u8>,
     /// Maximum number of consecutive FC(Wait) frames to accept before returning
     /// `IsoTpError::WaitLimitExceeded`. For example, a value of `3` permits up to
@@ -84,9 +92,9 @@ impl IsoTpConfig {
         }
     }
 
-    /// Interpret the raw `st_min` byte as a `Duration`.
-    ///
-    /// See the `frame::interpret_st_min` function for the encoding rules.
+    /// Interpret the raw `st_min` byte as a `Duration`, the way `send` treats
+    /// the STmin in a peer's FC: `0x00`--`0x7F` are milliseconds, `0xF1`--`0xF9`
+    /// (100--900 µs) are rounded up to 1 ms, and reserved values give 127 ms.
     #[must_use]
     pub fn st_min_duration(&self) -> Duration {
         crate::frame::interpret_st_min(self.st_min)

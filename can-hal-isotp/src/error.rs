@@ -9,17 +9,25 @@ use std::fmt;
 pub enum IsoTpError<E: Send + Sync + 'static> {
     /// Error from the underlying CAN channel.
     CanError(E),
-    /// A timeout expired (N_Bs or N_Cr).
+    /// A wait timed out: no SF or FF arrived in time in `receive`, or N_Bs (an
+    /// FC in `send`) or N_Cr (a CF in `receive`) expired.
     Timeout,
     /// The receiver sent a Flow Control frame with the Overflow flag.
     BufferOverflow,
-    /// A received frame could not be parsed as a valid ISO-TP PDU.
+    /// A frame isn't a valid ISO-TP PDU: [`IsoTpFrame::parse`] rejected it,
+    /// or `send` got a malformed Flow Control frame. (`receive` ignores
+    /// invalid frames.) `send_functional` also returns this when
+    /// [`IsoTpConfig::functional_id`] is `None`.
+    ///
+    /// [`IsoTpFrame::parse`]: crate::IsoTpFrame::parse
+    /// [`IsoTpConfig::functional_id`]: crate::IsoTpConfig::functional_id
     InvalidFrame,
     /// Consecutive Frame sequence number mismatch.
     SequenceError { expected: u8, got: u8 },
-    /// Payload exceeds the maximum allowed size. Both classic and FD use a
-    /// 32-bit length field via the long-FF escape, so the per-message ceiling
-    /// is `u32::MAX` bytes.
+    /// The payload is too large to send: over `u32::MAX` bytes for `send`
+    /// (classic and FD both reach that with the 32-bit FF_DL form), or over
+    /// the single-frame limit for `send_functional` (7 bytes, 6 with extended
+    /// addressing).
     PayloadTooLarge,
     /// Too many consecutive FC(Wait) frames received (exceeds `max_fc_wait`).
     WaitLimitExceeded,
