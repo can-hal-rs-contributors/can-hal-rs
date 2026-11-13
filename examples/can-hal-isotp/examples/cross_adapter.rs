@@ -17,7 +17,7 @@ fn main() {
     let tx_id = CanId::new_standard(0x7E0).unwrap();
     let rx_id = CanId::new_standard(0x7E8).unwrap();
 
-    // Test payloads: single frame (7 bytes), multi-frame (20 bytes), large (200 bytes)
+    // Test payloads: 2 and 7 bytes (single frame); 20, 200 and 1000 bytes (multi-frame)
     let payloads: Vec<Vec<u8>> = vec![
         vec![0x10, 0x01],                     // 2 bytes: UDS DiagSessionControl
         (0..7).collect(),                     // 7 bytes: max single frame
@@ -88,8 +88,12 @@ fn main() {
     }
 
     // Now test the reverse direction: Kvaser -> PCAN
-    println!("--- Test 5: 100 bytes (Kvaser -> PCAN) ---");
     let payload: Vec<u8> = (0..100).map(|i| (i * 3) as u8).collect();
+    println!(
+        "--- Test {}: {} bytes (Kvaser -> PCAN) ---",
+        payloads.len() + 1,
+        payload.len()
+    );
     let payload_send = payload.clone();
     let payload_expected = payload.clone();
 

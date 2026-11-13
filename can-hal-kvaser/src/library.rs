@@ -69,15 +69,17 @@ impl KvaserLibrary {
             let read_error_counters = *lib.get::<FnReadErrorCounters>(b"canReadErrorCounters\0")?;
             let io_ctl = *lib.get::<FnIoCtl>(b"canIoCtl\0")?;
 
-            // Optional: available in CANlib SDK >= 5.x. Falls back to
-            // canSetBusParams + canSetBusParamsFd when absent.
+            // Optional: older CANlib builds don't export it. open_fd falls
+            // back to canSetBusParams + canSetBusParamsFd when it's absent
+            // or refused for a channel.
             let set_bus_params_fd_tq = lib
                 .get::<FnSetBusParamsFdTq>(b"canSetBusParamsFdTq\0")
                 .ok()
                 .map(|sym| *sym);
 
-            // Optional: used only to ask for the device clock, which the
-            // timing solver falls back from when it's unknown.
+            // Optional: used only to ask for the device's clock. Without
+            // it the clock is unknown, and timing is computed for
+            // FALLBACK_CLOCK_HZ (classic tries an 8 MHz timing first).
             let get_channel_data = lib
                 .get::<FnGetChannelData>(b"canGetChannelData\0")
                 .ok()

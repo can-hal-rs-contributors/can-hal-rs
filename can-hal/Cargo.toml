@@ -18,6 +18,8 @@ default = ["std"]
 std = []
 async = []
 
+# A copy of the root Cargo.toml's [workspace.lints.clippy], inlined so the
+# crate builds outside the workspace; keep the two in step.
 [lints.clippy]
 # Pedantic (enable group, suppress noisy lints)
 pedantic = { level = "warn", priority = -1 }

@@ -33,11 +33,16 @@ fn test_pcan_bus_status() {
         "Expected ErrorActive bus state"
     );
 
-    let counters = channel
-        .error_counters()
-        .expect("Failed to read error counters");
-    assert_eq!(counters.transmit, 0, "Expected 0 TX errors");
-    assert_eq!(counters.receive, 0, "Expected 0 RX errors");
+    // PCAN-Basic has no parameter for the error counters, so error_counters()
+    // is unsupported on Windows.
+    let counters = channel.error_counters();
+    if cfg!(windows) {
+        assert!(counters.is_err(), "Expected Unsupported, got {counters:?}");
+    } else {
+        let counters = counters.expect("Failed to read error counters");
+        assert_eq!(counters.transmit, 0, "Expected 0 TX errors");
+        assert_eq!(counters.receive, 0, "Expected 0 RX errors");
+    }
 }
 
 #[test]
@@ -260,7 +265,7 @@ fn test_isotp_reverse_100_bytes() {
 }
 
 // ---------------------------------------------------------------------------
-// Extended (29-bit) CAN IDs - exercises the is_extended() branches in both
+// Extended (29-bit) CAN IDs - exercises the `CanId::Extended` arms in both
 // backends' convert layers and the EXT message-type flag handling. The
 // existing raw-frame and ISO-TP tests all use standard IDs.
 // ---------------------------------------------------------------------------
@@ -480,11 +485,153 @@ fn test_pcan_hardware_filter_blocks_non_matching() {
 }
 
 // ---------------------------------------------------------------------------
+// Filters and frame types: a filter matches frames of its own ID type only, so
+// a type with no filter in the set is rejected. The frames to drop go first,
+// and the receiver reads with try_receive until it returns None, so a backend
+// that drops a frame must go on to the next one rather than report an empty
+// queue.
+// ---------------------------------------------------------------------------
+
+/// Read everything `channel` has queued, until try_receive returns None.
+fn try_receive_all<C: Receive>(channel: &mut C) -> Vec<CanId> {
+    let mut ids = Vec::new();
+    while let Some(ts) = channel.try_receive().expect("try_receive") {
+        ids.push(ts.into_frame().id());
+    }
+    ids
+}
+
+fn open_pcan_classic() -> can_hal_pcan::PcanChannel<can_hal_pcan::Classic> {
+    can_hal_pcan::PcanDriver::new()
+        .unwrap()
+        .channel(0)
+        .unwrap()
+        .classic(ClassicBitrate::Br500K)
+        .connect()
+        .unwrap()
+}
+
+fn open_kvaser_classic() -> can_hal_kvaser::KvaserChannel<can_hal_kvaser::Classic> {
+    can_hal_kvaser::KvaserDriver::new()
+        .unwrap()
+        .channel(0)
+        .classic(500_000)
+        .unwrap()
+        .connect()
+        .unwrap()
+}
+
+fn send_all<T: Transmit>(tx: &mut T, ids: &[CanId]) {
+    for (i, &id) in (0u8..).zip(ids) {
+        tx.transmit(&CanFrame::new(id, &[i]).unwrap())
+            .unwrap_or_else(|e| panic!("transmit {id:?}: {e}"));
+    }
+    // Let the last frame reach the receiver's queue.
+    thread::sleep(Duration::from_millis(200));
+}
+
+// PCAN-Basic can queue a status message ahead of the frames; try_receive
+// must skip it and return the frame behind it, not report an empty queue.
+// A guard: libpcanbasic drops the status message that follows
+// CAN_Initialize, so a classic channel's queue doesn't start with one.
+#[test]
+fn test_pcan_try_receive_skips_status_messages() {
+    let id = CanId::new_standard(0x123).unwrap();
+    let mut pcan = open_pcan_classic();
+    let mut kvaser = open_kvaser_classic();
+    send_all(&mut kvaser, &[id]);
+    let received = try_receive_all(&mut pcan);
+    assert_eq!(received, [id], "try_receive returned {received:?}");
+}
+
+#[test]
+fn test_kvaser_standard_filter_blocks_extended() {
+    let std_id = CanId::new_standard(0x200).unwrap();
+    let mut kvaser = open_kvaser_classic();
+    kvaser
+        .set_filters(&[Filter::new(std_id, 0x7FF)])
+        .expect("set_filters failed");
+    let mut pcan = open_pcan_classic();
+    send_all(
+        &mut pcan,
+        &[
+            CanId::new_extended(0x200).unwrap(),
+            CanId::new_extended(0x1234_5200).unwrap(),
+            CanId::new_extended(0x1FFF_FFFF).unwrap(),
+            std_id,
+        ],
+    );
+    let received = try_receive_all(&mut kvaser);
+    assert_eq!(received, [std_id], "a standard filter passed {received:?}");
+}
+
+#[test]
+fn test_kvaser_extended_filter_blocks_standard() {
+    let ext_id = CanId::new_extended(0x200).unwrap();
+    let mut kvaser = open_kvaser_classic();
+    kvaser
+        .set_filters(&[Filter::new(ext_id, 0x1FFF_FFFF)])
+        .expect("set_filters failed");
+    let mut pcan = open_pcan_classic();
+    send_all(
+        &mut pcan,
+        &[
+            CanId::new_standard(0x200).unwrap(),
+            CanId::new_standard(0x7FF).unwrap(),
+            ext_id,
+        ],
+    );
+    let received = try_receive_all(&mut kvaser);
+    assert_eq!(received, [ext_id], "an extended filter passed {received:?}");
+}
+
+#[test]
+fn test_pcan_standard_filter_blocks_extended() {
+    let std_id = CanId::new_standard(0x200).unwrap();
+    let mut pcan = open_pcan_classic();
+    pcan.set_filters(&[Filter::new(std_id, 0x7FF)])
+        .expect("set_filters failed");
+    let mut kvaser = open_kvaser_classic();
+    send_all(
+        &mut kvaser,
+        &[
+            CanId::new_extended(0x200).unwrap(),
+            // 0x200 in the top 11 bits, where a filter shared by both
+            // types would compare a standard ID.
+            CanId::new_extended(0x200 << 18).unwrap(),
+            std_id,
+        ],
+    );
+    let received = try_receive_all(&mut pcan);
+    assert_eq!(received, [std_id], "a standard filter passed {received:?}");
+}
+
+#[test]
+fn test_pcan_extended_filter_blocks_standard() {
+    let ext_id = CanId::new_extended(0x100).unwrap();
+    let mut pcan = open_pcan_classic();
+    pcan.set_filters(&[Filter::new(ext_id, 0x1FFF_FFFF)])
+        .expect("set_filters failed");
+    let mut kvaser = open_kvaser_classic();
+    send_all(
+        &mut kvaser,
+        &[
+            CanId::new_standard(0x100).unwrap(),
+            CanId::new_standard(0x7FF).unwrap(),
+            ext_id,
+        ],
+    );
+    let received = try_receive_all(&mut pcan);
+    assert_eq!(received, [ext_id], "an extended filter passed {received:?}");
+}
+
+// ---------------------------------------------------------------------------
 // classic_explicit smoke - Kvaser's classic_explicit path skips the solver
 // and goes directly to canSetBusParams with the user-supplied segments. We
-// reproduce the solver's 500K nominal output (tseg1=13, tseg2=6, sjw=4) and
-// verify a PCAN <-> Kvaser frame still rounds-trips, confirming the explicit
-// code path produces a controller configuration compatible with PCAN.
+// use 13/6/4, the 20 TQ, 70% timing the solver picks for 500K on an 80 MHz
+// clock (the U100's), and verify a PCAN <-> Kvaser frame still round-trips,
+// confirming the explicit code path produces a controller configuration
+// compatible with PCAN.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -556,7 +703,7 @@ fn test_kvaser_classic_explicit_round_trip() {
 // ---------------------------------------------------------------------------
 // Drop-and-reopen - verifies that closing a channel (via Drop) properly
 // releases the underlying hardware handle so the same index can be reopened.
-// Regression cover for the finalize_channel cleanup added to PCAN.
+// Regression cover for `PcanChannel`'s `Drop` calling `CAN_Uninitialize`.
 // ---------------------------------------------------------------------------
 
 #[test]

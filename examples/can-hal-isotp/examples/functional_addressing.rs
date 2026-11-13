@@ -64,11 +64,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "Listener: received frame on 0x7DF, data: {:02X?}",
                 frame.data()
             );
-            // Expected data: [02 10 01] (SF_DL=2, then the 2 UDS bytes)
+            // Expected data: [02 10 01 CC CC CC CC CC] (SF_DL=2, the 2 UDS
+            // bytes, then the default 0xCC padding up to 8 bytes)
+            let sf_dl = usize::from(frame.data()[0] & 0x0F);
             println!(
-                "  SF_DL = {}, payload = {:02X?}",
-                frame.data()[0],
-                &frame.data()[1..]
+                "  SF_DL = {sf_dl}, payload = {:02X?}",
+                frame.data().get(1..=sf_dl).unwrap_or_default()
             );
             Ok(())
         } else {

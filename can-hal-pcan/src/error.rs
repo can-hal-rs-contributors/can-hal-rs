@@ -61,7 +61,8 @@ pub enum PcanError {
     LibraryLoad(libloading::Error),
     /// A PCAN-Basic API call returned a non-OK status.
     Pcan(PcanStatus),
-    /// Failed to construct a frame (invalid ID, data length, etc.).
+    /// Failed to construct a frame (invalid ID, data length, etc.), or to
+    /// pass the FD timing string to PCAN-Basic.
     InvalidFrame(String),
     /// The requested channel index does not map to a known PCAN handle.
     InvalidChannel(u32),
@@ -73,6 +74,8 @@ pub enum PcanError {
     UnsupportedTiming(String),
     /// A platform-specific error (e.g., event creation failed).
     Platform(String),
+    /// The operation isn't available on this platform or device.
+    Unsupported(&'static str),
 }
 
 impl fmt::Display for PcanError {
@@ -85,6 +88,7 @@ impl fmt::Display for PcanError {
             Self::UnsupportedBitrate(br) => write!(f, "unsupported bitrate {br} bps"),
             Self::UnsupportedTiming(msg) => write!(f, "unsupported FD timing: {msg}"),
             Self::Platform(msg) => write!(f, "platform error: {msg}"),
+            Self::Unsupported(msg) => write!(f, "unsupported: {msg}"),
         }
     }
 }

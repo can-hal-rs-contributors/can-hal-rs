@@ -2,6 +2,11 @@ use std::time::Duration;
 
 use crate::error::IsoTpError;
 
+/// Most bytes `receive()` reserves up front for a message: the largest FF_DL
+/// of the 12-bit form. FF_DL comes from the peer and can be up to `u32::MAX`
+/// with the 32-bit form, so a longer message grows as its CFs arrive instead.
+pub(crate) const MAX_RX_PREALLOC: usize = 0xFFF;
+
 /// Flow Control flag values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FcFlag {
@@ -17,7 +22,9 @@ pub enum IsoTpFrame<'a> {
         data: &'a [u8],
     },
     FirstFrame {
+        /// FF_DL: the length of the whole message.
         total_len: usize,
+        /// The message bytes this FF carries, never more than `total_len`.
         data: &'a [u8],
     },
     ConsecutiveFrame {
@@ -46,34 +53,34 @@ impl<'a> IsoTpFrame<'a> {
         match frame_type {
             // Single Frame
             0x0 => {
-                let sf_dl = (pci[0] & 0x0F) as usize;
-                if sf_dl == 0 {
-                    // FD Single Frame: 2-byte PCI [0x00, DL]
-                    if pci.len() < 2 || pci[1] == 0 {
-                        return Err(IsoTpError::InvalidFrame);
-                    }
-                    let fd_dl = pci[1] as usize;
-                    if overhead + 2 + fd_dl > raw.len() {
-                        return Err(IsoTpError::InvalidFrame);
-                    }
-                    let data = &raw[overhead + 2..overhead + 2 + fd_dl];
-                    Ok(IsoTpFrame::SingleFrame { data })
-                } else {
-                    // Classic SF: 1-byte PCI
-                    if sf_dl > 7 || overhead + 1 + sf_dl > raw.len() {
-                        return Err(IsoTpError::InvalidFrame);
-                    }
-                    let data = &raw[overhead + 1..overhead + 1 + sf_dl];
-                    Ok(IsoTpFrame::SingleFrame { data })
+                // As in the Linux kernel (isotp_rcv): a frame of up to 8
+                // bytes holds SF_DL in the PCI's low nibble, and a CAN FD
+                // frame longer than that uses the escape form, a zero nibble
+                // with SF_DL in the next byte. Either form in the other kind
+                // of frame is invalid.
+                let (pci_len, sf_dl) = match (raw.len() <= 8, pci[0] & 0x0F, pci.get(1)) {
+                    (true, nibble, _) => (1, nibble),
+                    (false, 0, Some(&sf_dl)) => (2, sf_dl),
+                    (false, _, _) => return Err(IsoTpError::InvalidFrame),
+                };
+                let start = overhead + pci_len;
+                let end = start + usize::from(sf_dl);
+                if sf_dl == 0 || end > raw.len() {
+                    return Err(IsoTpError::InvalidFrame);
                 }
+                Ok(IsoTpFrame::SingleFrame {
+                    data: &raw[start..end],
+                })
             }
             // First Frame
             0x1 => {
-                if pci.len() < 2 {
+                // An FF fills its CAN frame, as the Linux kernel requires
+                // (isotp_rcv_ff): 8 bytes, or a CAN FD length from 12 to 64.
+                if !matches!(raw.len(), 8 | 12 | 16 | 20 | 24 | 32 | 48 | 64) || pci.len() < 2 {
                     return Err(IsoTpError::InvalidFrame);
                 }
                 let len12 = (((pci[0] & 0x0F) as usize) << 8) | (pci[1] as usize);
-                if len12 == 0 {
+                let (total_len, pci_len) = if len12 == 0 {
                     // Long FF: 32-bit length in bytes 2..6
                     if pci.len() < 6 {
                         return Err(IsoTpError::InvalidFrame);
@@ -82,25 +89,23 @@ impl<'a> IsoTpFrame<'a> {
                         | ((pci[3] as usize) << 16)
                         | ((pci[4] as usize) << 8)
                         | (pci[5] as usize);
-                    let data_start = overhead + 6;
-                    let data = if data_start < raw.len() {
-                        &raw[data_start..]
-                    } else {
-                        &[]
-                    };
-                    Ok(IsoTpFrame::FirstFrame { total_len, data })
+                    (total_len, 6)
                 } else {
-                    let data_start = overhead + 2;
-                    let data = if data_start < raw.len() {
-                        &raw[data_start..]
-                    } else {
-                        &[]
-                    };
-                    Ok(IsoTpFrame::FirstFrame {
-                        total_len: len12,
-                        data,
-                    })
+                    (len12, 2)
+                };
+                let data = &pci[pci_len..];
+                // FF_DL must cover the bytes this FF carries; an FD frame
+                // longer than 8 bytes may carry one more (the Linux kernel's
+                // allowance for the SF_DL escape byte, isotp_rcv_ff), which
+                // is padding, so cut the data to FF_DL.
+                let slack = usize::from(raw.len() > 8);
+                if total_len < data.len().saturating_sub(slack) {
+                    return Err(IsoTpError::InvalidFrame);
                 }
+                Ok(IsoTpFrame::FirstFrame {
+                    total_len,
+                    data: &data[..data.len().min(total_len)],
+                })
             }
             // Consecutive Frame
             0x2 => {
@@ -134,6 +139,13 @@ impl<'a> IsoTpFrame<'a> {
             _ => Err(IsoTpError::InvalidFrame),
         }
     }
+}
+
+/// Whether `raw` carries the Flow Control PCI type (0x3), valid FC or not.
+///
+/// `overhead` is as for [`IsoTpFrame::parse`].
+pub(crate) fn has_fc_pci(raw: &[u8], overhead: usize) -> bool {
+    raw.get(overhead).is_some_and(|pci| pci >> 4 == 0x3)
 }
 
 /// Build a Single Frame into `buf`. Returns the total frame length.
@@ -207,7 +219,8 @@ pub fn build_fc(
     pos + 3
 }
 
-/// Returns the next valid CAN FD DLC value >= `len`. Panics if `len > 64`.
+/// Returns the smallest valid CAN FD data length (in bytes) that is >= `len`.
+/// Panics if `len > 64`.
 pub(crate) fn next_fd_dlc(len: usize) -> usize {
     match len {
         0..=8 => len,
@@ -301,8 +314,9 @@ pub fn build_fc_fd(
 /// Interpret a raw STmin byte (from an FC frame) as a `Duration`.
 ///
 /// - 0x00–0x7F: value in milliseconds (0–127 ms)
-/// - 0xF1–0xF9: 100–900 microseconds, rounded up to 1 ms (OS sleep granularity)
-/// - All other values: treated as zero delay
+/// - 0xF1–0xF9: 100–900 microseconds, rounded up to 1 ms
+/// - All other values are reserved: treated as 0x7F (127 ms), the longest
+///   valid STmin, as ISO 15765-2 has a sender do when it receives one
 pub(crate) fn interpret_st_min(st_min: u8) -> Duration {
     match st_min {
         0x00..=0x7F => Duration::from_millis(u64::from(st_min)),
@@ -310,6 +324,6 @@ pub(crate) fn interpret_st_min(st_min: u8) -> Duration {
             let us = u64::from(st_min - 0xF0) * 100;
             Duration::from_micros(us).max(Duration::from_millis(1))
         }
-        _ => Duration::ZERO,
+        _ => Duration::from_millis(127),
     }
 }

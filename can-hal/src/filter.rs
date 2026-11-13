@@ -28,12 +28,18 @@ impl Filter {
 
 /// Hardware acceptance filtering.
 ///
+/// A filter matches frames of its own ID type only: a standard filter never
+/// passes an extended frame, nor an extended filter a standard one. So a frame
+/// type with no filter in the set is rejected. Remote frames match on their ID
+/// like data frames.
+///
 /// **Important**: The exact semantics of multiple filters depend on the backend.
 /// Some hardware (e.g. SocketCAN) supports multiple independent filters
 /// (union - a frame passes if it matches *any* filter). Other hardware
-/// (e.g. PCAN, Kvaser) only supports a single filter pair per frame type
+/// (e.g. PCAN, Kvaser) only supports a single filter per frame type
 /// (standard / extended), so multiple filters must be merged into one, which
-/// may accept a broader range of IDs than intended.
+/// may accept a broader range of IDs of that type than intended, but never a
+/// frame of the other type.
 ///
 /// For portable code that needs precise multi-ID filtering, consider using a
 /// single permissive hardware filter and applying software-level filtering on

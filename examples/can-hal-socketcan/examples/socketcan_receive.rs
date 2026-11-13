@@ -39,16 +39,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let frame = timestamped.frame();
                 let elapsed = timestamped.timestamp().elapsed();
 
+                let payload = if frame.is_remote_frame() {
+                    "RTR".to_string()
+                } else {
+                    format!(
+                        "data=[{}]",
+                        frame
+                            .data()
+                            .iter()
+                            .map(|b| format!("{b:02X}"))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )
+                };
                 println!(
-                    "RX: ID=0x{:03X} DLC={} data=[{}] ({elapsed:.1?} ago)",
+                    "RX: ID=0x{:03X} DLC={} {payload} ({elapsed:.1?} ago)",
                     frame.id().raw(),
-                    frame.len(),
-                    frame
-                        .data()
-                        .iter()
-                        .map(|b| format!("{b:02X}"))
-                        .collect::<Vec<_>>()
-                        .join(" "),
+                    frame.dlc(),
                 );
             }
             None => {

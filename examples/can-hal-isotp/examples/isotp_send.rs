@@ -15,7 +15,9 @@
 // Defaults: interface = "vcan0", payload = "DEADBEEF01020304"
 //
 // The sender uses tx_id=0x7E0, rx_id=0x7E8.
-// Run the "receive" example in another terminal to see the message.
+// Start the isotp_receive example in another terminal first: the default
+// 8-byte payload takes more than one frame, so send() needs the receiver's
+// Flow Control frame within its 2 s timeout.
 
 use std::env;
 use std::time::Duration;

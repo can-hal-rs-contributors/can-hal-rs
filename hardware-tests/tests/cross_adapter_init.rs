@@ -144,9 +144,16 @@ fn test_pcan_bus_status_fd() {
         .connect()
         .unwrap();
     assert_eq!(ch.bus_state().expect("bus_state"), BusState::ErrorActive);
-    let counters = ch.error_counters().expect("error_counters");
-    assert_eq!(counters.transmit, 0);
-    assert_eq!(counters.receive, 0);
+    // PCAN-Basic has no parameter for the error counters, so error_counters()
+    // is unsupported on Windows.
+    let counters = ch.error_counters();
+    if cfg!(windows) {
+        assert!(counters.is_err(), "expected Unsupported, got {counters:?}");
+    } else {
+        let counters = counters.expect("error_counters");
+        assert_eq!(counters.transmit, 0);
+        assert_eq!(counters.receive, 0);
+    }
 }
 
 #[test]
@@ -221,6 +228,91 @@ fn test_pcan_fd_hardware_filter_blocks_non_matching() {
         1,
         "expected one matching frame, got {received:?}"
     );
+}
+
+// FD frames under a filter of the other ID type, read with try_receive_fd
+// until it returns None (see the classic tests in cross_adapter.rs).
+
+/// Read everything `channel` has queued, until try_receive_fd returns None.
+fn try_receive_all_fd<C: ReceiveFd>(channel: &mut C) -> Vec<CanId> {
+    let mut ids = Vec::new();
+    while let Some(ts) = channel.try_receive_fd().expect("try_receive_fd") {
+        ids.push(ts.into_frame().id());
+    }
+    ids
+}
+
+fn open_pcan_fd() -> can_hal_pcan::PcanChannel<can_hal_pcan::Fd> {
+    can_hal_pcan::PcanDriver::new()
+        .unwrap()
+        .channel(0)
+        .unwrap()
+        .fd(500_000, 4_000_000)
+        .unwrap()
+        .connect()
+        .unwrap()
+}
+
+fn open_kvaser_fd() -> can_hal_kvaser::KvaserChannel<can_hal_kvaser::Fd> {
+    can_hal_kvaser::KvaserDriver::new()
+        .unwrap()
+        .channel(0)
+        .fd(500_000, 4_000_000)
+        .unwrap()
+        .connect()
+        .unwrap()
+}
+
+fn send_all_fd<T: TransmitFd>(tx: &mut T, ids: &[CanId]) {
+    for &id in ids {
+        tx.transmit_fd(&CanFdFrame::new(id, &[0x5A; 12], true, false).unwrap())
+            .unwrap_or_else(|e| panic!("transmit {id:?}: {e}"));
+    }
+    thread::sleep(Duration::from_millis(200));
+}
+
+// PCAN-Basic can queue a status message ahead of the frames; try_receive_fd
+// must skip it and return the frame behind it, not report an empty queue.
+#[test]
+fn test_pcan_fd_try_receive_skips_status_messages() {
+    let id = CanId::new_standard(0x123).unwrap();
+    let mut pcan = open_pcan_fd();
+    let mut kvaser = open_kvaser_fd();
+    send_all_fd(&mut kvaser, &[id]);
+    let received = try_receive_all_fd(&mut pcan);
+    assert_eq!(received, [id], "try_receive_fd returned {received:?}");
+}
+
+#[test]
+fn test_kvaser_fd_standard_filter_blocks_extended() {
+    let std_id = CanId::new_standard(0x200).unwrap();
+    let mut kvaser = open_kvaser_fd();
+    kvaser
+        .set_filters(&[Filter::new(std_id, 0x7FF)])
+        .expect("set_filters failed");
+    let mut pcan = open_pcan_fd();
+    send_all_fd(
+        &mut pcan,
+        &[
+            CanId::new_extended(0x200).unwrap(),
+            CanId::new_extended(0x1234_5200).unwrap(),
+            std_id,
+        ],
+    );
+    let received = try_receive_all_fd(&mut kvaser);
+    assert_eq!(received, [std_id], "a standard filter passed {received:?}");
+}
+
+#[test]
+fn test_pcan_fd_extended_filter_blocks_standard() {
+    let ext_id = CanId::new_extended(0x100).unwrap();
+    let mut pcan = open_pcan_fd();
+    pcan.set_filters(&[Filter::new(ext_id, 0x1FFF_FFFF)])
+        .expect("set_filters failed");
+    let mut kvaser = open_kvaser_fd();
+    send_all_fd(&mut kvaser, &[CanId::new_standard(0x100).unwrap(), ext_id]);
+    let received = try_receive_all_fd(&mut pcan);
+    assert_eq!(received, [ext_id], "an extended filter passed {received:?}");
 }
 
 // ---------------------------------------------------------------------------
@@ -412,8 +504,7 @@ fn test_pcan_fd_drop_and_reopen() {
 #[test]
 fn test_pcan_invalid_channel_index_rejected() {
     let driver = can_hal_pcan::PcanDriver::new().unwrap();
-    // PCAN channel indices are 0..=15; anything larger must be rejected before
-    // the u16 cast rather than silently truncating to channel 0.
+    // PCAN channel indices are 0..=15, so 16 and up must be rejected.
     assert!(
         driver.channel(16).is_err(),
         "PCAN channel index 16 must be rejected"

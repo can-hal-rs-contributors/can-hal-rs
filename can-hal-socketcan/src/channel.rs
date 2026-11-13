@@ -154,8 +154,8 @@ impl ReceiveFd for SocketCanChannel {
         loop {
             let any_frame = self.socket.read_frame()?;
             let now = Instant::now();
-            if let Ok(frame) = convert::from_socketcan_any_frame(any_frame) {
-                return Ok(Timestamped::new(frame, now));
+            if let Some(frame) = convert::from_socketcan_any_frame(&any_frame) {
+                return Ok(Timestamped::new(frame?, now));
             }
             // Skip error frames.
         }
@@ -163,15 +163,18 @@ impl ReceiveFd for SocketCanChannel {
 
     fn try_receive_fd(&mut self) -> Result<Option<Timestamped<Frame, Instant>>, Self::Error> {
         self.ensure_nonblocking()?;
-        match self.socket.read_frame() {
-            Ok(any_frame) => {
-                let now = Instant::now();
-                Ok(convert::from_socketcan_any_frame(any_frame)
-                    .ok()
-                    .map(|frame| Timestamped::new(frame, now)))
+        loop {
+            match self.socket.read_frame() {
+                Ok(any_frame) => {
+                    if let Some(frame) = convert::from_socketcan_any_frame(&any_frame) {
+                        let now = Instant::now();
+                        return Ok(Some(Timestamped::new(frame?, now)));
+                    }
+                    // Skip error frames, drain queue.
+                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+                Err(e) => return Err(SocketCanError::Io(e)),
             }
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(None),
-            Err(e) => Err(SocketCanError::Io(e)),
         }
     }
 
@@ -186,8 +189,8 @@ impl ReceiveFd for SocketCanChannel {
             match self.socket.read_frame() {
                 Ok(any_frame) => {
                     let now = Instant::now();
-                    if let Ok(frame) = convert::from_socketcan_any_frame(any_frame) {
-                        break Ok(Some(Timestamped::new(frame, now)));
+                    if let Some(frame) = convert::from_socketcan_any_frame(&any_frame) {
+                        break frame.map(|f| Some(Timestamped::new(f, now)));
                     }
                     // Skip error frames. Update remaining timeout.
                     if now >= deadline {

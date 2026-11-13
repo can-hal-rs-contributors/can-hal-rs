@@ -31,7 +31,8 @@
 //! does this on the Linux runner, with the interface up and the env var set):
 //!
 //! ```bash
-//! CAN_HAL_REQUIRE_VCAN=1 cargo test -p hardware-tests --features vcan
+//! CAN_HAL_REQUIRE_VCAN=1 cargo test -p hardware-tests --features vcan \
+//!   --test socketcan_vcan -- --test-threads=1
 //! ```
 #![cfg(all(target_os = "linux", feature = "vcan"))]
 
@@ -39,9 +40,9 @@ use std::time::{Duration, Instant};
 
 use can_hal::channel::{Receive, ReceiveFd, Transmit, TransmitFd};
 use can_hal::filter::{Filter, Filterable};
-use can_hal::frame::{CanFdFrame, CanFrame, Frame};
+use can_hal::frame::{CanFdFrame, CanFrame, Frame, Timestamped};
 use can_hal::CanId;
-use can_hal_socketcan::{SocketCanChannel, SocketCanDriver};
+use can_hal_socketcan::{SocketCanChannel, SocketCanDriver, SocketCanError};
 
 /// Virtual CAN interface the tests transmit and receive on.
 const IFACE: &str = "vcan0";
@@ -213,7 +214,7 @@ fn test_vcan_fd_loopback_brs_and_dlc() {
     let Some((mut tx, mut rx)) = open_pair() else {
         return;
     };
-    // Spans single-byte lengths and the FD-only DLC steps (12, 20, 48, 64).
+    // Spans lengths classic CAN allows (0, 8) and FD-only ones (12, 20, 48, 64).
     let lengths = [0usize, 8, 12, 20, 48, 64];
     for (i, &len) in lengths.iter().enumerate() {
         // Alternate the bit-rate-switch flag so both states round-trip.
@@ -325,9 +326,10 @@ fn test_vcan_classic_receive_skips_fd_frames() {
 }
 
 // ---------------------------------------------------------------------------
-// Filter behavior. SocketCAN supports multiple independent filters with union
-// semantics, unlike PCAN/Kvaser which collapse to a single ID+mask pair. This
-// is the distinguishing feature worth covering here.
+// Filter behavior. SocketCAN applies each filter exactly (union semantics),
+// unlike PCAN and Kvaser, which keep one acceptance window per frame type
+// widened to cover every filter (an ID range on PCAN, a code+mask on Kvaser).
+// This is the distinguishing feature worth covering here.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -407,6 +409,106 @@ fn test_vcan_empty_filter_set_accepts_all() {
 }
 
 // ---------------------------------------------------------------------------
+// Filters and frame types: a filter matches frames of its own ID type only,
+// so a type with no filter in the set is rejected. Remote frames match on
+// their ID, like data frames.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_vcan_standard_filter_rejects_extended_frames() {
+    let Some((mut tx, mut rx)) = open_pair() else {
+        return;
+    };
+    let std_id = CanId::new_standard(0x100).unwrap();
+    // Low 11 bits equal to 0x100, and the extended ID 0x100 itself.
+    let ext_alias = CanId::new_extended(0x1234_5100).unwrap();
+    let ext_same = CanId::new_extended(0x100).unwrap();
+
+    rx.set_filters(&[Filter::new(std_id, 0x7FF)])
+        .expect("set_filters failed");
+    tx.transmit(&CanFrame::new(ext_alias, &[0x01]).unwrap())
+        .unwrap();
+    tx.transmit(&CanFrame::new(ext_same, &[0x02]).unwrap())
+        .unwrap();
+    tx.transmit(&CanFrame::new(std_id, &[0x03]).unwrap())
+        .unwrap();
+
+    let ids: Vec<CanId> = drain_classic(&mut rx, Duration::from_millis(800))
+        .iter()
+        .map(CanFrame::id)
+        .collect();
+    assert_eq!(ids, vec![std_id], "a standard filter passed {ids:?}");
+}
+
+#[test]
+fn test_vcan_standard_wildcard_filter_rejects_extended_frames() {
+    let Some((mut tx, mut rx)) = open_pair() else {
+        return;
+    };
+    let std_id = CanId::new_standard(0x555).unwrap();
+    let ext_id = CanId::new_extended(0x18DA_00F1).unwrap();
+
+    // Mask 0: any standard ID.
+    rx.set_filters(&[Filter::new(CanId::new_standard(0).unwrap(), 0)])
+        .expect("set_filters failed");
+    tx.transmit(&CanFrame::new(ext_id, &[0x01]).unwrap())
+        .unwrap();
+    tx.transmit(&CanFrame::new(std_id, &[0x02]).unwrap())
+        .unwrap();
+
+    let ids: Vec<CanId> = drain_classic(&mut rx, Duration::from_millis(800))
+        .iter()
+        .map(CanFrame::id)
+        .collect();
+    assert_eq!(
+        ids,
+        vec![std_id],
+        "a standard wildcard filter passed {ids:?}"
+    );
+}
+
+#[test]
+fn test_vcan_extended_filter_rejects_standard_frames() {
+    let Some((mut tx, mut rx)) = open_pair() else {
+        return;
+    };
+    let ext_id = CanId::new_extended(0x100).unwrap();
+    let std_same = CanId::new_standard(0x100).unwrap();
+
+    rx.set_filters(&[Filter::new(ext_id, 0x1FFF_FFFF)])
+        .expect("set_filters failed");
+    tx.transmit(&CanFrame::new(std_same, &[0x01]).unwrap())
+        .unwrap();
+    tx.transmit(&CanFrame::new(ext_id, &[0x02]).unwrap())
+        .unwrap();
+
+    let ids: Vec<CanId> = drain_classic(&mut rx, Duration::from_millis(800))
+        .iter()
+        .map(CanFrame::id)
+        .collect();
+    assert_eq!(ids, vec![ext_id], "an extended filter passed {ids:?}");
+}
+
+#[test]
+fn test_vcan_standard_filter_passes_matching_remote_frame() {
+    let Some((mut tx, mut rx)) = open_pair() else {
+        return;
+    };
+    let id = CanId::new_standard(0x100).unwrap();
+    rx.set_filters(&[Filter::new(id, 0x7FF)])
+        .expect("set_filters failed");
+    let remote = CanFrame::new_remote(id, 4).unwrap();
+    tx.transmit(&remote).unwrap();
+
+    let frames = drain_classic(&mut rx, Duration::from_millis(800));
+    assert_eq!(
+        frames,
+        vec![remote],
+        "the filter must not drop remote frames"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Blocking vs non-blocking mode switching. try_receive flips the socket to
 // non-blocking and receive_timeout flips it back; alternating calls must keep
 // working and not strand the socket in the wrong mode.
@@ -455,4 +557,84 @@ fn test_vcan_receive_timeout_returns_none_on_idle() {
         "receive_timeout returned too early: {:?}",
         start.elapsed()
     );
+}
+
+// ---------------------------------------------------------------------------
+// FD frames can-hal cannot represent. The kernel takes a CAN FD frame of any
+// length up to 64 from a raw socket, and loops it back to the host's other
+// sockets as written, so a 9-byte FD frame (which `CanFdFrame::new` refuses)
+// reaches a `ReceiveFd` reader. It must be reported, as the classic receive
+// path reports a frame it can't convert, not dropped.
+// ---------------------------------------------------------------------------
+
+/// Write an FD frame of 9 bytes with ID `id`, then a valid sentinel FD frame
+/// with ID `id + 1`, from a raw socket on `IFACE`; returns the sentinel.
+fn write_invalid_fd_then_sentinel(id: u16) -> CanFdFrame {
+    use socketcan::{EmbeddedFrame as _, Socket as _};
+
+    let raw_tx = socketcan::CanFdSocket::open(IFACE).expect("open raw FD socket");
+    let mut raw = socketcan::frame::canfd_frame_default();
+    raw.can_id = u32::from(id);
+    raw.len = 9;
+    raw.data[..9].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    raw_tx
+        .write_frame(&socketcan::CanFdFrame::from(raw))
+        .expect("write a 9-byte FD frame");
+
+    let data = [0xAA; 12];
+    let sc_sentinel =
+        socketcan::CanFdFrame::new(socketcan::StandardId::new(id + 1).unwrap(), &data).unwrap();
+    raw_tx
+        .write_frame(&sc_sentinel)
+        .expect("write the sentinel");
+    CanFdFrame::new(CanId::new_standard(id + 1).unwrap(), &data, false, false).unwrap()
+}
+
+/// Assert a receive call reported the 9-byte frame as `InvalidFrame`.
+fn assert_invalid_fd<T: std::fmt::Debug>(result: &Result<T, SocketCanError>) {
+    assert!(
+        matches!(result, Err(SocketCanError::InvalidFrame(_))),
+        "a 9-byte FD frame must be reported as InvalidFrame, got {result:?}"
+    );
+}
+
+/// Assert the channel still delivers the frame after the reported one.
+fn assert_sentinel_next(rx: &mut SocketCanChannel, sentinel: CanFdFrame) {
+    let next = rx
+        .receive_fd_timeout(Duration::from_secs(1))
+        .expect("receive error after the reported frame")
+        .map(Timestamped::into_frame);
+    assert_eq!(next, Some(Frame::Fd(sentinel)));
+}
+
+#[test]
+fn test_vcan_receive_fd_reports_invalid_fd_length() {
+    let Some(mut rx) = open() else {
+        return;
+    };
+    let sentinel = write_invalid_fd_then_sentinel(0x3A0);
+    assert_invalid_fd(&rx.receive_fd());
+    assert_sentinel_next(&mut rx, sentinel);
+}
+
+#[test]
+fn test_vcan_receive_fd_timeout_reports_invalid_fd_length() {
+    let Some(mut rx) = open() else {
+        return;
+    };
+    let sentinel = write_invalid_fd_then_sentinel(0x3B0);
+    assert_invalid_fd(&rx.receive_fd_timeout(Duration::from_secs(1)));
+    assert_sentinel_next(&mut rx, sentinel);
+}
+
+#[test]
+fn test_vcan_try_receive_fd_reports_invalid_fd_length() {
+    let Some(mut rx) = open() else {
+        return;
+    };
+    let sentinel = write_invalid_fd_then_sentinel(0x3C0);
+    // Both frames are queued once the writes return (local loopback is
+    // synchronous), so the first poll reads the 9-byte one.
+    assert_invalid_fd(&rx.try_receive_fd());
+    assert_sentinel_next(&mut rx, sentinel);
 }

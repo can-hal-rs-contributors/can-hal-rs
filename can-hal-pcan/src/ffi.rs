@@ -11,13 +11,19 @@ use std::os::raw::c_char;
 // Handle constants
 // ---------------------------------------------------------------------------
 
-/// First USB channel handle.
+/// First USB channel handle (USB channels 1-8 are 0x51-0x58).
 pub const PCAN_USBBUS1: u16 = 0x51;
 
-/// First PCI channel handle.
+/// Ninth USB channel handle (USB channels 9-16 are 0x509-0x510).
+pub const PCAN_USBBUS9: u16 = 0x509;
+
+/// First PCI channel handle (PCI channels 1-8 are 0x41-0x48).
 pub const PCAN_PCIBUS1: u16 = 0x41;
 
-/// First LAN channel handle.
+/// Ninth PCI channel handle (PCI channels 9-16 are 0x409-0x410).
+pub const PCAN_PCIBUS9: u16 = 0x409;
+
+/// First LAN channel handle (LAN channels 1-16 are 0x801-0x810).
 pub const PCAN_LANBUS1: u16 = 0x801;
 
 /// Map a (bus_type, 0-based index) pair to a PCAN handle value.
@@ -29,8 +35,10 @@ pub const fn pcan_handle(bus_type: u8, index: u16) -> Option<u16> {
         return None;
     }
     match bus_type {
-        0 => Some(PCAN_USBBUS1 + index),
-        1 => Some(PCAN_PCIBUS1 + index),
+        0 if index < 8 => Some(PCAN_USBBUS1 + index),
+        0 => Some(PCAN_USBBUS9 + (index - 8)),
+        1 if index < 8 => Some(PCAN_PCIBUS1 + index),
+        1 => Some(PCAN_PCIBUS9 + (index - 8)),
         2 => Some(PCAN_LANBUS1 + index),
         _ => None,
     }
@@ -61,6 +69,7 @@ pub const PCAN_MESSAGE_EXTENDED: u8 = 0x02;
 pub const PCAN_MESSAGE_FD: u8 = 0x04;
 pub const PCAN_MESSAGE_BRS: u8 = 0x08;
 pub const PCAN_MESSAGE_ESI: u8 = 0x10;
+pub const PCAN_MESSAGE_ERRFRAME: u8 = 0x40;
 pub const PCAN_MESSAGE_STATUS: u8 = 0x80;
 
 // ---------------------------------------------------------------------------
@@ -83,6 +92,7 @@ pub const PCAN_ERROR_NETINUSE: u32 = 0x00800;
 pub const PCAN_ERROR_ILLHW: u32 = 0x01400;
 pub const PCAN_ERROR_ILLNET: u32 = 0x01800;
 pub const PCAN_ERROR_ILLCLIENT: u32 = 0x01C00;
+pub const PCAN_ERROR_ILLHANDLE: u32 = PCAN_ERROR_ILLHW | PCAN_ERROR_ILLNET | PCAN_ERROR_ILLCLIENT;
 pub const PCAN_ERROR_RESOURCE: u32 = 0x02000;
 pub const PCAN_ERROR_ILLPARAMTYPE: u32 = 0x04000;
 pub const PCAN_ERROR_ILLPARAMVAL: u32 = 0x08000;
@@ -97,8 +107,8 @@ pub const PCAN_ERROR_ILLOPERATION: u32 = 0x8000000;
 // Filter modes
 // ---------------------------------------------------------------------------
 
-pub const PCAN_MODE_STANDARD: u8 = 0x01;
-pub const PCAN_MODE_EXTENDED: u8 = 0x02;
+pub const PCAN_MODE_STANDARD: u8 = PCAN_MESSAGE_STANDARD;
+pub const PCAN_MODE_EXTENDED: u8 = PCAN_MESSAGE_EXTENDED;
 
 // ---------------------------------------------------------------------------
 // Parameter IDs (for CAN_GetValue / CAN_SetValue)
@@ -108,10 +118,6 @@ pub const PCAN_RECEIVE_EVENT: u8 = 0x03;
 pub const PCAN_MESSAGE_FILTER: u8 = 0x04;
 pub const PCAN_BUSOFF_AUTORESET: u8 = 0x07;
 pub const PCAN_LISTEN_ONLY: u8 = 0x08;
-pub const PCAN_CONTROLLER_NUMBER: u8 = 0x1A;
-pub const PCAN_CHANNEL_CONDITION: u8 = 0x09;
-pub const PCAN_BUSERROR_READ: u8 = 0x24;
-pub const PCAN_BUSERROR_WRITE: u8 = 0x25;
 
 // Values for PCAN_MESSAGE_FILTER.
 pub const PCAN_FILTER_CLOSE: u32 = 0;
@@ -188,18 +194,25 @@ pub type FnSetValue =
 mod tests {
     use super::*;
 
+    // PCANBasic.h numbers USB and PCI channels 1-8 from 0x51 / 0x41, and
+    // channels 9-16 from 0x509 / 0x409.
     #[test]
     fn usb_handle_mapping() {
         assert_eq!(pcan_handle(0, 0), Some(PCAN_USBBUS1));
         assert_eq!(pcan_handle(0, 1), Some(PCAN_USBBUS1 + 1));
-        assert_eq!(pcan_handle(0, 15), Some(PCAN_USBBUS1 + 15));
+        assert_eq!(pcan_handle(0, 7), Some(0x58));
+        assert_eq!(pcan_handle(0, 8), Some(0x509));
+        assert_eq!(pcan_handle(0, 15), Some(0x510));
         assert_eq!(pcan_handle(0, 16), None);
     }
 
     #[test]
     fn pci_handle_mapping() {
         assert_eq!(pcan_handle(1, 0), Some(PCAN_PCIBUS1));
-        assert_eq!(pcan_handle(1, 15), Some(PCAN_PCIBUS1 + 15));
+        assert_eq!(pcan_handle(1, 7), Some(0x48));
+        assert_eq!(pcan_handle(1, 8), Some(0x409));
+        assert_eq!(pcan_handle(1, 15), Some(0x410));
+        assert_eq!(pcan_handle(1, 16), None);
     }
 
     #[test]
@@ -211,5 +224,12 @@ mod tests {
     #[test]
     fn invalid_bus_type() {
         assert_eq!(pcan_handle(3, 0), None);
+    }
+
+    // PCANBasic.h defines the filter modes as the message type flags.
+    #[test]
+    fn filter_modes_match_the_header() {
+        assert_eq!(PCAN_MODE_STANDARD, 0x00);
+        assert_eq!(PCAN_MODE_EXTENDED, 0x02);
     }
 }

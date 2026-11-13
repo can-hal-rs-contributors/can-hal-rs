@@ -2,7 +2,7 @@
 //!
 //! KVASER CANlib backend for [`can-hal-rs`](https://crates.io/crates/can-hal-rs).
 //!
-//! Loads `libcanlib.so` (Linux) or `canlib32.dll` (Windows) at runtime and
+//! Loads `libcanlib.so.1` (Linux) or `canlib32.dll` (Windows) at runtime and
 //! provides [`KvaserDriver`] and [`KvaserChannel<Mode>`]. The channel is
 //! parameterized on a type-state marker - [`mode::Classic`] or
 //! [`mode::Fd`] - so invalid combinations are compile errors.

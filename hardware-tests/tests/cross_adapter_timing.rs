@@ -445,8 +445,9 @@ fn test_mismatched_timing_raises_errors() {
         // and keep polling the bus status.
         let _ = pcan.transmit(&frame);
         let state = pcan.bus_state().expect("bus_state");
-        let counters = pcan.error_counters().expect("error_counters");
-        if state != BusState::ErrorActive || counters.transmit > 0 {
+        // error_counters() is unsupported on Windows.
+        let tx_errors = pcan.error_counters().map_or(0, |c| c.transmit);
+        if state != BusState::ErrorActive || tx_errors > 0 {
             detected = true;
             break;
         }
@@ -459,5 +460,79 @@ fn test_mismatched_timing_raises_errors() {
 
     victim.join().expect("Kvaser victim thread panicked");
     // Let the bus settle before the next test opens channels.
+    thread::sleep(Duration::from_millis(200));
+}
+
+#[test]
+fn test_pcan_error_counters_follow_bus_state() {
+    // The same mismatch: PCAN at 250K, Kvaser at 500K. None of PCAN's frames
+    // is acknowledged, so its transmit error counter climbs until it goes
+    // error passive at 128. Once bus_state() has left ErrorActive, the
+    // counters must show why: a counter at the warning limit (96) or above,
+    // not the zeros of a healthy bus. On Windows, where PCAN-Basic has no
+    // parameter for the counters, error_counters() must say so rather than
+    // report zeros.
+    let victim = thread::spawn(move || {
+        let driver = can_hal_kvaser::KvaserDriver::new().unwrap();
+        let mut ch = driver
+            .channel(0)
+            .classic(500_000)
+            .unwrap()
+            .connect()
+            .unwrap();
+        let _ = ch.receive_timeout(Duration::from_secs(3));
+    });
+
+    thread::sleep(Duration::from_millis(200));
+
+    let mut pcan = can_hal_pcan::PcanDriver::new()
+        .unwrap()
+        .channel(0)
+        .unwrap()
+        .classic(ClassicBitrate::Br250K)
+        .connect()
+        .unwrap();
+    let frame = CanFrame::new(CanId::new_standard(0x191).unwrap(), &[0xFF; 8]).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut state = BusState::ErrorActive;
+    while Instant::now() < deadline {
+        let _ = pcan.transmit(&frame);
+        state = pcan.bus_state().expect("bus_state");
+        if state != BusState::ErrorActive {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_ne!(
+        state,
+        BusState::ErrorActive,
+        "the timing mismatch never moved PCAN out of ErrorActive"
+    );
+
+    if cfg!(windows) {
+        let counters = pcan.error_counters();
+        assert!(
+            counters.is_err(),
+            "error_counters() must be unsupported on Windows, got {counters:?}"
+        );
+    } else {
+        // The counters and the state come from different reports by the
+        // device, so give the counters a moment to catch up.
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let counters = loop {
+            let counters = pcan.error_counters().expect("error_counters");
+            if counters.transmit >= 96 || Instant::now() >= deadline {
+                break counters;
+            }
+            thread::sleep(Duration::from_millis(20));
+        };
+        assert!(
+            counters.transmit >= 96,
+            "PCAN is {state:?} but reports {counters:?}"
+        );
+    }
+
+    victim.join().expect("Kvaser victim thread panicked");
     thread::sleep(Duration::from_millis(200));
 }

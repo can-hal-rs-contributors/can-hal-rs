@@ -15,9 +15,10 @@ use can_hal::bus::{BusState, BusStatus, ErrorCounters};
 use can_hal::channel::{Receive, ReceiveFd, Transmit, TransmitFd};
 use can_hal::filter::{Filter, Filterable};
 use can_hal::frame::{CanFdFrame, CanFrame, Frame, Timestamped};
+use can_hal::id::CanId;
 
 use crate::convert;
-use crate::error::{check_status, PcanError};
+use crate::error::{check_status, PcanError, PcanStatus};
 use crate::event::ReceiveEvent;
 use crate::ffi;
 use crate::library::PcanLibrary;
@@ -37,7 +38,28 @@ pub struct PcanChannel<Mode> {
     lib: Arc<PcanLibrary>,
     handle: u16,
     event: ReceiveEvent,
+    /// The ID ranges `set_filters` opened, or `None` while the channel
+    /// accepts every frame.
+    filter: Option<IdRanges>,
     _mode: PhantomData<Mode>,
+}
+
+/// The ID range a filter set opened for each frame type, `None` for a type
+/// with no filter.
+#[derive(Debug, Clone, Copy)]
+struct IdRanges {
+    standard: Option<(u32, u32)>,
+    extended: Option<(u32, u32)>,
+}
+
+impl IdRanges {
+    fn accepts(&self, id: CanId) -> bool {
+        let (range, raw) = match id {
+            CanId::Standard(v) => (self.standard, u32::from(v)),
+            CanId::Extended(v) => (self.extended, v),
+        };
+        range.is_some_and(|(from, to)| (from..=to).contains(&raw))
+    }
 }
 
 impl<Mode> PcanChannel<Mode> {
@@ -48,57 +70,72 @@ impl<Mode> PcanChannel<Mode> {
             lib,
             handle,
             event,
+            filter: None,
             _mode: PhantomData,
         }
+    }
+
+    /// Whether the filter set accepts a frame with this ID.
+    fn accepts(&self, id: CanId) -> bool {
+        self.filter.map_or(true, |ranges| ranges.accepts(id))
     }
 }
 
 impl PcanChannel<Classic> {
     /// Try to read a classic CAN frame from the receive queue. Returns
-    /// `Ok(None)` if the queue is empty or the frame was skipped (RTR,
-    /// status).
+    /// `Ok(None)` if the queue is empty. Status messages, error frames, and
+    /// frames the filter set rejects, are skipped.
     fn read_classic(&self) -> Result<Option<CanFrame>, PcanError> {
-        let mut msg = ffi::TPCANMsg {
-            id: 0,
-            msg_type: 0,
-            len: 0,
-            data: [0; 8],
-        };
-        let mut ts = ffi::TPCANTimestamp {
-            millis: 0,
-            millis_overflow: 0,
-            micros: 0,
-        };
-        // SAFETY: read() was loaded from PCANBasic and self.handle is valid from a successful CAN_Initialize.
-        // msg and ts point to valid stack-allocated TPCANMsg and TPCANTimestamp.
-        let status = unsafe { (self.lib.read)(self.handle, &mut msg, &mut ts) };
-        if status == ffi::PCAN_ERROR_QRCVEMPTY {
-            return Ok(None);
+        loop {
+            let mut msg = ffi::TPCANMsg {
+                id: 0,
+                msg_type: 0,
+                len: 0,
+                data: [0; 8],
+            };
+            let mut ts = ffi::TPCANTimestamp {
+                millis: 0,
+                millis_overflow: 0,
+                micros: 0,
+            };
+            // SAFETY: read() was loaded from PCANBasic and self.handle is valid from a successful CAN_Initialize.
+            // msg and ts point to valid stack-allocated TPCANMsg and TPCANTimestamp.
+            let status = unsafe { (self.lib.read)(self.handle, &mut msg, &mut ts) };
+            if status == ffi::PCAN_ERROR_QRCVEMPTY {
+                return Ok(None);
+            }
+            check_status(status)?;
+            if let Some(frame) = convert::from_pcan_msg(&msg)?.filter(|f| self.accepts(f.id())) {
+                return Ok(Some(frame));
+            }
         }
-        check_status(status)?;
-        convert::from_pcan_msg(&msg)
     }
 }
 
 impl PcanChannel<Fd> {
     /// Try to read any frame (classic or FD) via `CAN_ReadFD`. Returns
-    /// `Ok(None)` if the queue is empty or the frame was skipped.
+    /// `Ok(None)` if the queue is empty. Status messages, error frames, and
+    /// frames the filter set rejects, are skipped.
     fn read_fd(&self) -> Result<Option<Frame>, PcanError> {
-        let mut msg = ffi::TPCANMsgFD {
-            id: 0,
-            msg_type: 0,
-            dlc: 0,
-            data: [0; 64],
-        };
-        let mut ts: u64 = 0;
-        // SAFETY: read_fd() was loaded from PCANBasic and self.handle is valid from a successful CAN_InitializeFD.
-        // msg and ts point to valid stack-allocated TPCANMsgFD and u64.
-        let status = unsafe { (self.lib.read_fd)(self.handle, &mut msg, &mut ts) };
-        if status == ffi::PCAN_ERROR_QRCVEMPTY {
-            return Ok(None);
+        loop {
+            let mut msg = ffi::TPCANMsgFD {
+                id: 0,
+                msg_type: 0,
+                dlc: 0,
+                data: [0; 64],
+            };
+            let mut ts: u64 = 0;
+            // SAFETY: read_fd() was loaded from PCANBasic and self.handle is valid from a successful CAN_InitializeFD.
+            // msg and ts point to valid stack-allocated TPCANMsgFD and u64.
+            let status = unsafe { (self.lib.read_fd)(self.handle, &mut msg, &mut ts) };
+            if status == ffi::PCAN_ERROR_QRCVEMPTY {
+                return Ok(None);
+            }
+            check_status(status)?;
+            if let Some(frame) = convert::from_pcan_msg_fd(&msg)?.filter(|f| self.accepts(f.id())) {
+                return Ok(Some(frame));
+            }
         }
-        check_status(status)?;
-        convert::from_pcan_msg_fd(&msg)
     }
 }
 
@@ -252,6 +289,11 @@ impl<Mode> Filterable for PcanChannel<Mode> {
     /// actually narrow we first switch the channel's `PCAN_MESSAGE_FILTER`
     /// state to `CLOSE` (reject all), then call `CAN_FilterMessages` to open
     /// the requested ranges.
+    ///
+    /// The hardware filter can pass frames of the other type: an extended
+    /// range passes the standard IDs inside it, and on Windows the two types
+    /// share one filter. So the receive methods also drop frames outside the
+    /// range opened for their type.
     fn set_filters(&mut self, filters: &[Filter]) -> Result<(), Self::Error> {
         if filters.is_empty() {
             return self.clear_filters();
@@ -295,7 +337,12 @@ impl<Mode> Filterable for PcanChannel<Mode> {
             Ok(())
         })();
 
-        if apply.is_err() {
+        if apply.is_ok() {
+            self.filter = Some(IdRanges {
+                standard: std_min.zip(std_max),
+                extended: ext_min.zip(ext_max),
+            });
+        } else {
             // Best-effort: leave filters in accept-all rather than a
             // half-merged state. Ignore secondary cleanup failure.
             #[allow(clippy::let_underscore_must_use)]
@@ -305,6 +352,7 @@ impl<Mode> Filterable for PcanChannel<Mode> {
     }
 
     fn clear_filters(&mut self) -> Result<(), Self::Error> {
+        self.filter = None;
         // Switch PCAN_MESSAGE_FILTER to OPEN to accept all frames regardless
         // of frame type. Using SetValue avoids the expand-only semantics of
         // CAN_FilterMessages.
@@ -357,66 +405,173 @@ impl<Mode> BusStatus for PcanChannel<Mode> {
     fn bus_state(&self) -> Result<BusState, Self::Error> {
         // SAFETY: get_status() was loaded from PCANBasic and self.handle is valid.
         let status = unsafe { (self.lib.get_status)(self.handle) };
-
-        if status & ffi::PCAN_ERROR_BUSOFF != 0 {
-            Ok(BusState::BusOff)
-        } else if status & ffi::PCAN_ERROR_BUSPASSIVE != 0 || status & ffi::PCAN_ERROR_BUSHEAVY != 0
-        {
-            Ok(BusState::ErrorPassive)
-        } else {
-            // PCAN_ERROR_OK or PCAN_ERROR_BUSLIGHT → ErrorActive
-            Ok(BusState::ErrorActive)
-        }
+        bus_state_from_status(status)
     }
 
+    /// Read the transmit and receive error counters.
+    ///
+    /// PCAN-Basic has no parameter for them. On Linux they're read from the
+    /// `tx_errors` / `rx_errors` attributes that PEAK's driver keeps in sysfs
+    /// for the channel's device; a device that doesn't track them returns
+    /// [`PcanError::Unsupported`]. The driver updates its copy when the
+    /// device reports a bus error, so after the bus recovers it can read
+    /// higher than the controller's own counters. On Windows this always
+    /// returns [`PcanError::Unsupported`].
     fn error_counters(&self) -> Result<ErrorCounters, Self::Error> {
-        // PCAN-Basic's support for individual TX/RX error counters varies by
-        // hardware. Attempt to read them; fall back to 0 if unsupported.
-        let mut rx_errors: u32 = 0;
-        #[allow(clippy::cast_possible_truncation)] // size_of::<u32>() == 4, fits in u32
-        // SAFETY: get_value() was loaded from PCANBasic and self.handle is valid.
-        // rx_errors points to a valid stack-allocated u32 with correct buffer length.
-        let status_rx = unsafe {
-            (self.lib.get_value)(
-                self.handle,
-                ffi::PCAN_BUSERROR_READ,
-                std::ptr::from_mut(&mut rx_errors).cast::<std::ffi::c_void>(),
-                std::mem::size_of::<u32>() as u32,
-            )
-        };
+        #[cfg(target_os = "linux")]
+        {
+            sysfs_error_counters(self.event.fd())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Err(PcanError::Unsupported(
+                "PCAN-Basic has no parameter for the error counters",
+            ))
+        }
+    }
+}
 
-        let mut tx_errors: u32 = 0;
-        #[allow(clippy::cast_possible_truncation)] // size_of::<u32>() == 4, fits in u32
-        // SAFETY: get_value() was loaded from PCANBasic and self.handle is valid.
-        // tx_errors points to a valid stack-allocated u32 with correct buffer length.
-        let status_tx = unsafe {
-            (self.lib.get_value)(
-                self.handle,
-                ffi::PCAN_BUSERROR_WRITE,
-                std::ptr::from_mut(&mut tx_errors).cast::<std::ffi::c_void>(),
-                std::mem::size_of::<u32>() as u32,
-            )
-        };
+/// Read the error counters of the PEAK driver's device behind `fd` from
+/// `/sys/dev/char/<major>:<minor>/{tx,rx}_errors`.
+#[cfg(target_os = "linux")]
+fn sysfs_error_counters(fd: i32) -> Result<ErrorCounters, PcanError> {
+    const UNSUPPORTED: PcanError =
+        PcanError::Unsupported("the PCAN driver doesn't report error counters for this device");
 
-        Ok(ErrorCounters {
-            receive: if status_rx == ffi::PCAN_ERROR_OK {
-                rx_errors.min(255) as u8
-            } else {
-                0
-            },
-            transmit: if status_tx == ffi::PCAN_ERROR_OK {
-                tx_errors.min(255) as u8
-            } else {
-                0
-            },
-        })
+    // SAFETY: libc::stat is a plain C struct, for which all zero bytes is a
+    // valid value.
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: fstat() is given a descriptor the channel owns and a pointer
+    // to a stat struct for it to fill.
+    if unsafe { libc::fstat(fd, &mut st) } != 0 {
+        return Err(UNSUPPORTED);
+    }
+    let dir = format!(
+        "/sys/dev/char/{}:{}",
+        libc::major(st.st_rdev),
+        libc::minor(st.st_rdev)
+    );
+    let read = |name: &str| -> Option<u8> {
+        let text = std::fs::read_to_string(format!("{dir}/{name}")).ok()?;
+        let value: u32 = text.trim().parse().ok()?;
+        // A receive counter can pass 255; the trait's counters are u8.
+        #[allow(clippy::cast_possible_truncation)] // clamped to 255 first
+        Some(value.min(255) as u8)
+    };
+    match (read("tx_errors"), read("rx_errors")) {
+        (Some(transmit), Some(receive)) => Ok(ErrorCounters { transmit, receive }),
+        _ => Err(UNSUPPORTED),
+    }
+}
+
+/// Map a `CAN_GetStatus` result to a [`BusState`].
+///
+/// The bus flags give the state. The transmit and receive queue flags say
+/// nothing about it, so they're ignored. Any other status (e.g.
+/// `PCAN_ERROR_ILLHW` for an unplugged adapter, or `PCAN_ERROR_INITIALIZE`)
+/// means there's no bus state to read, and is returned as an error.
+const fn bus_state_from_status(status: u32) -> Result<BusState, PcanError> {
+    const BUS_FLAGS: u32 = ffi::PCAN_ERROR_BUSLIGHT
+        | ffi::PCAN_ERROR_BUSHEAVY
+        | ffi::PCAN_ERROR_BUSPASSIVE
+        | ffi::PCAN_ERROR_BUSOFF;
+    const QUEUE_FLAGS: u32 = ffi::PCAN_ERROR_XMTFULL
+        | ffi::PCAN_ERROR_OVERRUN
+        | ffi::PCAN_ERROR_QRCVEMPTY
+        | ffi::PCAN_ERROR_QOVERRUN
+        | ffi::PCAN_ERROR_QXMTFULL;
+
+    if status & !(BUS_FLAGS | QUEUE_FLAGS) != 0 {
+        Err(PcanError::Pcan(PcanStatus(status)))
+    } else if status & ffi::PCAN_ERROR_BUSOFF != 0 {
+        Ok(BusState::BusOff)
+    } else if status & ffi::PCAN_ERROR_BUSPASSIVE != 0 || status & ffi::PCAN_ERROR_BUSHEAVY != 0 {
+        // libpcanbasic on Linux reports error passive as BUSHEAVY (plus
+        // BUSPASSIVE on an FD channel) and the warning limit as BUSLIGHT.
+        // PCANBasic.h names BUSHEAVY the warning limit, so where PCAN-Basic
+        // reports it that way, the warning limit reads as ErrorPassive, as it
+        // does on Kvaser.
+        Ok(BusState::ErrorPassive)
+    } else {
+        // PCAN_ERROR_OK or PCAN_ERROR_BUSLIGHT
+        Ok(BusState::ErrorActive)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use can_hal::id::CanId;
+
+    #[test]
+    fn bus_state_from_bus_flags() {
+        assert_eq!(
+            bus_state_from_status(ffi::PCAN_ERROR_OK).unwrap(),
+            BusState::ErrorActive
+        );
+        assert_eq!(
+            bus_state_from_status(ffi::PCAN_ERROR_BUSLIGHT).unwrap(),
+            BusState::ErrorActive
+        );
+        assert_eq!(
+            bus_state_from_status(ffi::PCAN_ERROR_BUSHEAVY).unwrap(),
+            BusState::ErrorPassive
+        );
+        assert_eq!(
+            bus_state_from_status(ffi::PCAN_ERROR_BUSPASSIVE).unwrap(),
+            BusState::ErrorPassive
+        );
+        assert_eq!(
+            bus_state_from_status(ffi::PCAN_ERROR_BUSOFF).unwrap(),
+            BusState::BusOff
+        );
+        // Queue flags don't change the state.
+        assert_eq!(
+            bus_state_from_status(ffi::PCAN_ERROR_BUSOFF | ffi::PCAN_ERROR_QOVERRUN).unwrap(),
+            BusState::BusOff
+        );
+    }
+
+    // CAN_GetStatus returns these instead of a bus state when it can't read
+    // one: the adapter was unplugged, the handle is invalid, or the channel
+    // isn't initialized.
+    #[test]
+    fn bus_state_from_failed_status_is_an_error() {
+        for status in [
+            ffi::PCAN_ERROR_ILLHW,
+            ffi::PCAN_ERROR_ILLHANDLE,
+            ffi::PCAN_ERROR_INITIALIZE,
+            ffi::PCAN_ERROR_NODRIVER,
+        ] {
+            assert!(
+                matches!(
+                    bus_state_from_status(status),
+                    Err(PcanError::Pcan(PcanStatus(s))) if s == status
+                ),
+                "status 0x{status:X} must be an error, got {:?}",
+                bus_state_from_status(status)
+            );
+        }
+    }
+
+    #[test]
+    fn id_ranges_keep_each_type_to_its_own_range() {
+        let ranges = IdRanges {
+            standard: None,
+            extended: Some((0x100, 0x1FF)),
+        };
+        assert!(ranges.accepts(CanId::new_extended(0x100).unwrap()));
+        assert!(ranges.accepts(CanId::new_extended(0x1FF).unwrap()));
+        assert!(!ranges.accepts(CanId::new_extended(0x200).unwrap()));
+        assert!(!ranges.accepts(CanId::new_standard(0x100).unwrap()));
+
+        let ranges = IdRanges {
+            standard: Some((0x200, 0x200)),
+            extended: None,
+        };
+        assert!(ranges.accepts(CanId::new_standard(0x200).unwrap()));
+        assert!(!ranges.accepts(CanId::new_standard(0x201).unwrap()));
+        assert!(!ranges.accepts(CanId::new_extended(0x200).unwrap()));
+    }
 
     #[test]
     fn mask_to_range_exact_standard() {

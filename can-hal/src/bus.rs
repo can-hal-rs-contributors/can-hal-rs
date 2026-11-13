@@ -3,13 +3,17 @@ use crate::error::CanError;
 /// The error state of a CAN bus controller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BusState {
-    /// Normal operation. Error counters are below 128.
+    /// Normal operation; both error counters are at most 127. Some backends
+    /// (Kvaser, and PCAN where PCAN-Basic reports the warning state as
+    /// BUSHEAVY) already return `ErrorPassive` once a counter reaches the
+    /// warning limit (96).
     ErrorActive,
-    /// Error counters have reached the warning threshold (128–255).
-    /// The controller can still communicate but may be experiencing issues.
+    /// An error counter has reached 128 (or the warning limit on the
+    /// backends above). The node still communicates, using passive error
+    /// flags.
     ErrorPassive,
-    /// The controller has gone off-bus due to excessive errors (counter > 255).
-    /// No frames can be sent or received until recovery.
+    /// The transmit error counter exceeded 255. No frames are sent or
+    /// received until recovery.
     BusOff,
 }
 

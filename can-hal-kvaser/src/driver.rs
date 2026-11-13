@@ -71,8 +71,9 @@ const MAX_PRESCALER: u32 = 1024;
 
 /// Minimum phase-segment-2 the solver will emit. Windows CANlib rejects a
 /// tseg2 of 1 TQ with canERR_PARAM (Linux drivers accept it), so the solver
-/// keeps tseg2 >= 2 to stay portable. This never changes a default
-/// sample-point result - those already resolve to tseg2 >= 2.
+/// keeps tseg2 >= 2 to stay portable. That changes no classic default, but
+/// some FD data-phase defaults get more TQ (3.2 Mbit/s at 80 MHz: 25 instead
+/// of 5) or no timing at all (8 Mbit/s at 32 MHz).
 const MIN_TSEG2: u32 = 2;
 
 /// Nominal bus parameters: (tseg1, tseg2, sjw, noSamp, syncMode).
@@ -336,10 +337,11 @@ impl KvaserDriver {
 
     /// Begin configuring the channel at the given 0-based index.
     ///
-    /// Infallible: invalid indices (negative drivers, missing hardware)
-    /// surface at `connect()` when CANlib's `canOpenChannel` is called.
+    /// Infallible: invalid indices (out of range, missing hardware) surface
+    /// at `connect()` when CANlib's `canOpenChannel` is called.
     /// Asks CANlib for the channel's clock, which the timing is computed for;
-    /// see [`classic`](KvaserChannelBuilder::classic) for when it's unknown.
+    /// see [`classic`](KvaserChannelBuilder::classic) and
+    /// [`fd`](KvaserChannelBuilder::fd) for when it's unknown.
     #[must_use]
     #[allow(clippy::cast_possible_wrap)] // channel index is small, fits in i32
     pub fn channel(&self, index: u32) -> KvaserChannelBuilder<Initial> {
@@ -358,9 +360,11 @@ impl KvaserDriver {
 /// Typestate-driven builder for a KVASER channel.
 ///
 /// Start with [`Initial`] (returned by [`KvaserDriver::channel`]) and
-/// transition to either [`Classic`] (via [`classic`](Self::classic)) or
-/// [`Fd`] (via [`fd`](Self::fd)). Only the methods valid for the current
-/// state are available.
+/// transition to [`Classic`] (via [`classic`](Self::classic)), [`Fd`] (via
+/// [`fd`](Self::fd)), or the raw-timing [`ClassicExplicit`] / [`FdExplicit`]
+/// (via [`classic_explicit`](Self::classic_explicit) /
+/// [`fd_explicit`](Self::fd_explicit)). Only the methods valid for the
+/// current state are available.
 pub struct KvaserChannelBuilder<Mode> {
     lib: Arc<KvaserLibrary>,
     channel_index: i32,
@@ -405,11 +409,11 @@ impl<Mode> KvaserChannelBuilder<Mode> {
     }
 }
 
-/// Allow opening virtual channels (e.g. the Kvaser Virtual CAN
-/// Driver). Defaults to `false` when not called. Maps to CANlib's
-/// `canOPEN_ACCEPT_VIRTUAL` flag, which is ignored by physical
-/// hardware, so enabling it does not affect real devices
 impl<Mode> KvaserChannelBuilder<Mode> {
+    /// Allow opening virtual channels (e.g. the Kvaser Virtual CAN Driver).
+    /// Defaults to `false`. Maps to CANlib's `canOPEN_ACCEPT_VIRTUAL` flag,
+    /// which has no effect on a physical channel; without it, `connect()`
+    /// fails on a virtual one.
     #[must_use]
     pub const fn accept_virtual(mut self, accept: bool) -> Self {
         self.accept_virtual = accept;
@@ -468,14 +472,18 @@ impl KvaserChannelBuilder<Initial> {
     /// takes the frequency as input and derives the prescaler from
     /// `clock / (bitrate_hz * (1 + tseg1 + tseg2))`.
     ///
-    /// Returns `Err` if any of the following don't hold (each surfaces at
-    /// the call site rather than at `connect()`), for the device's clock,
-    /// or the 80 MHz [`FALLBACK_CLOCK_HZ`] when CANlib doesn't report it:
+    /// Returns `Err` if any of the following don't hold for the device's
+    /// clock, or the 80 MHz [`FALLBACK_CLOCK_HZ`] when CANlib doesn't report
+    /// it:
     ///
     /// - `bitrate_hz` evenly divides the clock,
     /// - `tseg1` is in `[1, 256]` and `tseg2` is in `[2, 128]`,
     /// - `bitrate_hz * (1 + tseg1 + tseg2)` evenly divides the clock, and
     /// - the resulting prescaler is in `[1, 1024]`.
+    ///
+    /// These surface here rather than at `connect()`, except when the clock
+    /// is assumed and the device's own differs: then CANlib can still reject
+    /// the timing at `connect()`.
     pub fn classic_explicit(
         self,
         bitrate_hz: u32,
@@ -502,9 +510,9 @@ impl KvaserChannelBuilder<Initial> {
     /// Bypasses the timing solver. The returned builder has no setters; the
     /// next call must be [`connect`](KvaserChannelBuilder::connect).
     ///
-    /// Returns `Err` if any of the following don't hold (each surfaces at
-    /// the call site rather than at `connect()`), for the device's clock,
-    /// or the 80 MHz [`FALLBACK_CLOCK_HZ`] when CANlib doesn't report it:
+    /// Returns `Err` if any of the following don't hold for the device's
+    /// clock, or the 80 MHz [`FALLBACK_CLOCK_HZ`] when CANlib doesn't report
+    /// it:
     ///
     /// - both `nominal_hz` and `data_hz` evenly divide the clock,
     /// - nominal `tseg1` in `[1, 256]`, `tseg2` in `[2, 128]`,
@@ -512,6 +520,10 @@ impl KvaserChannelBuilder<Initial> {
     /// - `bitrate * (1 + tseg1 + tseg2)` evenly divides the clock for each
     ///   phase, and
     /// - each resulting prescaler is in `[1, 1024]`.
+    ///
+    /// These surface here rather than at `connect()`, except when the clock
+    /// is assumed and the device's own differs: then CANlib can still reject
+    /// the timing at `connect()`.
     pub fn fd_explicit(
         self,
         nominal_hz: u32,
@@ -716,9 +728,10 @@ fn open_fd(
     }
 
     let result = (|| {
-        // Try canSetBusParamsFdTq first. It sets both nominal and data-phase
-        // timing in one call using explicit time quanta and works identically
-        // on Windows and Linux.
+        // Try canSetBusParamsFdTq first: one call sets nominal and data
+        // timing from explicit time quanta. CANlib may not export it, or may
+        // refuse it for a channel (below); then use canSetBusParams +
+        // canSetBusParamsFd.
         let use_legacy = if let Some(set_fd_tq) = lib.set_bus_params_fd_tq {
             let nominal_tq = to_nominal_tq(nominal_hz, params, clock_hz)?;
             let data_tq = to_data_tq(data_hz, fd_params, clock_hz)?;

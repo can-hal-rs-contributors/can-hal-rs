@@ -4,7 +4,7 @@
 //   - Both adapters must be configured for the same bitrates (500 kbit/s nominal, 4 Mbit/s data)
 //
 // Software requirements:
-//   - Linux: KVASER linuxcan drivers and libcanlib.so installed
+//   - Linux: KVASER linuxcan drivers and libcanlib.so.1 installed
 //     Install from: https://www.kvaser.com/downloads-kvaser/
 //   - Windows: CANlib SDK installed (canlib32.dll in system PATH)
 //     Install from: https://www.kvaser.com/downloads-kvaser/
@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match channel.transmit_fd(&frame) {
             Ok(()) => {
                 println!(
-                    "TX: ID=0x{:03X} DLC={} BRS={} data=[{} ...]",
+                    "TX: ID=0x{:03X} len={} BRS={} data=[{} ...]",
                     frame.id().raw(),
                     frame.len(),
                     frame.brs(),

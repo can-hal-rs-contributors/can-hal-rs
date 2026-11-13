@@ -14,7 +14,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! can-hal-rs = { version = "0.3", default-features = false }
+//! can-hal-rs = { version = "0.4", default-features = false }
 //! ```
 //!
 //! ## Quick start
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn can_fd_frame_invalid_dlc() {
         let id = CanId::new_standard(0x100).unwrap();
-        // 9 is not a valid FD DLC
+        // 9 is not a valid FD data length
         assert!(CanFdFrame::new(id, &[0; 9], false, false).is_none());
     }
 

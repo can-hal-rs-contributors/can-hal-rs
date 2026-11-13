@@ -2,8 +2,8 @@
 //!
 //! PCAN-Basic backend for [`can_hal`] (Windows and Linux).
 //!
-//! Provides [`PcanDriver`] and [`PcanChannel<Mode>`] which implement the
-//! hardware-agnostic channel traits defined in `can-hal`. The channel is
+//! Provides [`PcanDriver`] and [`PcanChannel<Mode>`]; the channel implements
+//! the hardware-agnostic traits defined in `can-hal`. The channel is
 //! parameterized on a type-state marker - [`mode::Classic`] or
 //! [`mode::Fd`] - so invalid combinations (e.g., calling `transmit_fd` on a
 //! classic channel) are compile errors, not runtime ones.

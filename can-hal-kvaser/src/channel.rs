@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use can_hal::{
-    BusState, BusStatus, CanFdFrame, CanFrame, ErrorCounters, Filter, Filterable, Frame, Receive,
-    ReceiveFd, Timestamped, Transmit, TransmitFd,
+    BusState, BusStatus, CanFdFrame, CanFrame, CanId, ErrorCounters, Filter, Filterable, Frame,
+    Receive, ReceiveFd, Timestamped, Transmit, TransmitFd,
 };
 
 /// Maximum poll interval for the event fd.
@@ -38,6 +38,11 @@ pub struct KvaserChannel<Mode> {
     lib: Arc<KvaserLibrary>,
     handle: i32,
     event: ReceiveEvent,
+    /// Whether the filter set lets standard / extended frames through at
+    /// all. CANlib can't reject every ID of one type, so `read_frame` drops
+    /// the frames of a type with no filter.
+    accept_std: bool,
+    accept_ext: bool,
     _mode: PhantomData<Mode>,
 }
 
@@ -47,38 +52,55 @@ impl<Mode> KvaserChannel<Mode> {
             lib,
             handle,
             event,
+            accept_std: true,
+            accept_ext: true,
             _mode: PhantomData,
         }
     }
 
-    /// Non-blocking read. Returns `Ok(None)` if the queue is empty.
-    fn read_frame(&mut self) -> Result<Option<Frame>, KvaserError> {
-        let mut raw_id: c_long = 0;
-        // 64 bytes covers both classic CAN (<=8 bytes used) and CAN FD (<=64 bytes).
-        let mut data = [0u8; 64];
-        let mut dlc: u32 = 0;
-        let mut flags: u32 = 0;
-        let mut timestamp: c_ulong = 0;
-
-        // SAFETY: canRead was loaded from canlib; handle is valid; all pointers are stack-allocated
-        let status = unsafe {
-            (self.lib.read)(
-                self.handle,
-                &mut raw_id,
-                data.as_mut_ptr().cast(),
-                &mut dlc,
-                &mut flags,
-                &mut timestamp,
-            )
-        };
-
-        if status == CAN_ERR_NOMSG {
-            return Ok(None);
+    /// Whether the filter set lets frames of this ID's type through.
+    const fn accepts(&self, id: CanId) -> bool {
+        if id.is_extended() {
+            self.accept_ext
+        } else {
+            self.accept_std
         }
-        check_status(status)?;
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        // CAN ID is at most 29 bits; raw_id from canRead is always non-negative
-        from_canlib_frame(raw_id as u32, &data, dlc, flags)
+    }
+
+    /// Non-blocking read. Returns `Ok(None)` if the queue is empty. Error
+    /// frames, and frames of a type the filter set rejects, are skipped.
+    fn read_frame(&mut self) -> Result<Option<Frame>, KvaserError> {
+        loop {
+            let mut raw_id: c_long = 0;
+            // 64 bytes covers both classic CAN (<=8 bytes used) and CAN FD (<=64 bytes).
+            let mut data = [0u8; 64];
+            let mut dlc: u32 = 0;
+            let mut flags: u32 = 0;
+            let mut timestamp: c_ulong = 0;
+
+            // SAFETY: canRead was loaded from canlib; handle is valid; all pointers are stack-allocated
+            let status = unsafe {
+                (self.lib.read)(
+                    self.handle,
+                    &mut raw_id,
+                    data.as_mut_ptr().cast(),
+                    &mut dlc,
+                    &mut flags,
+                    &mut timestamp,
+                )
+            };
+
+            if status == CAN_ERR_NOMSG {
+                return Ok(None);
+            }
+            check_status(status)?;
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            // CAN ID is at most 29 bits; raw_id from canRead is always non-negative
+            let frame = from_canlib_frame(raw_id as u32, &data, dlc, flags)?;
+            if let Some(frame) = frame.filter(|f| self.accepts(f.id())) {
+                return Ok(Some(frame));
+            }
+        }
     }
 }
 
@@ -271,7 +293,33 @@ impl<Mode> Filterable for KvaserChannel<Mode> {
         if filters.is_empty() {
             return Ok(());
         }
+        let has_std = filters.iter().any(|f| f.id.is_standard());
+        let has_ext = filters.iter().any(|f| f.id.is_extended());
         let apply = (|| {
+            // Narrow a type with no filter to one ID, so the queue doesn't
+            // fill with frames read_frame would drop. Some boards share one
+            // mask between the types (canlib.h), and there the last write
+            // wins, so the user's filters go after this.
+            if !has_std {
+                accept_only(
+                    &self.lib,
+                    self.handle,
+                    0x7FF,
+                    0x7FF,
+                    CAN_FILTER_SET_CODE_STD,
+                    CAN_FILTER_SET_MASK_STD,
+                )?;
+            }
+            if !has_ext {
+                accept_only(
+                    &self.lib,
+                    self.handle,
+                    0x1FFF_FFFF,
+                    0x1FFF_FFFF,
+                    CAN_FILTER_SET_CODE_EXT,
+                    CAN_FILTER_SET_MASK_EXT,
+                )?;
+            }
             apply_merged_filter(
                 &self.lib,
                 self.handle,
@@ -290,7 +338,10 @@ impl<Mode> Filterable for KvaserChannel<Mode> {
             )?;
             Ok(())
         })();
-        if apply.is_err() {
+        if apply.is_ok() {
+            self.accept_std = has_std;
+            self.accept_ext = has_ext;
+        } else {
             // Best-effort: leave filters in accept-all rather than a
             // half-merged state. Ignore secondary cleanup failure.
             #[allow(clippy::let_underscore_must_use)]
@@ -300,6 +351,8 @@ impl<Mode> Filterable for KvaserChannel<Mode> {
     }
 
     fn clear_filters(&mut self) -> Result<(), KvaserError> {
+        self.accept_std = true;
+        self.accept_ext = true;
         for &flag in &[
             CAN_FILTER_SET_CODE_STD,
             CAN_FILTER_SET_MASK_STD,
@@ -344,6 +397,23 @@ fn merge_filters(filters: &[Filter], predicate: impl Fn(&Filter) -> bool) -> Opt
         });
     }
     merged
+}
+
+/// Accept only `id` for one frame type: code `id`, and `id_mask` (every ID
+/// bit of the type) as the mask.
+#[allow(clippy::cast_possible_wrap, clippy::cast_lossless)] // c_long is i32 on Windows, i64 on Linux
+fn accept_only(
+    lib: &KvaserLibrary,
+    handle: i32,
+    id: u32,
+    id_mask: u32,
+    code_flag: u32,
+    mask_flag: u32,
+) -> Result<(), KvaserError> {
+    // SAFETY: canAccept was loaded from canlib; handle is valid
+    check_status(unsafe { (lib.accept)(handle, id as c_long, code_flag) })?;
+    // SAFETY: canAccept was loaded from canlib; handle is valid
+    check_status(unsafe { (lib.accept)(handle, id_mask as c_long, mask_flag) })
 }
 
 /// Merge filters matching `predicate` and apply via `canAccept`.
@@ -405,7 +475,6 @@ impl<Mode> BusStatus for KvaserChannel<Mode> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use can_hal::id::CanId;
 
     fn accepts(code: u32, mask: u32, id: u32) -> bool {
         id & mask == code

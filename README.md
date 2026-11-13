@@ -27,7 +27,7 @@ Backend implementations for Linux SocketCAN, PEAK PCAN, and KVASER adapters. The
 | [`can-hal-kvaser`](can-hal-kvaser/) | KVASER CANlib backend (Windows and Linux) |
 | [`can-hal-isotp`](can-hal-isotp/) | ISO-TP (ISO 15765-2) transport layer |
 
-Each backend exposes a concrete driver with a typestate-driven builder: `.channel(idx)` returns an `Initial` state, then `.classic(...)` or `.fd(nominal, data)` transitions to a `Classic` or `Fd` state where only the methods valid for that mode are callable. Channels are likewise mode-parameterized - `PcanChannel<Classic>` implements `Transmit + Receive`; `PcanChannel<Fd>` implements `TransmitFd + ReceiveFd`. Invalid combinations are compile errors, not runtime errors.
+The PCAN and Kvaser backends expose a concrete driver with a typestate-driven builder: `.channel(idx)` returns an `Initial` state, then `.classic(...)` or `.fd(nominal, data)` transitions to a `Classic` or `Fd` state where only the methods valid for that mode are callable. Channels are likewise mode-parameterized - `PcanChannel<Classic>` implements `Transmit + Receive`; `PcanChannel<Fd>` implements `TransmitFd + ReceiveFd`. Invalid combinations are compile errors, not runtime errors. SocketCAN's timing is set by the OS, so its builder only picks the interface, and one `SocketCanChannel` implements both the classic and FD traits.
 
 ## Example
 
@@ -51,7 +51,7 @@ let driver = PcanDriver::new().unwrap();
 let mut channel = driver.channel(0).unwrap().classic(ClassicBitrate::Br500K).connect().unwrap();
 ```
 
-For Kvaser, classic bitrate is a `u32` validated against the 80 MHz CANlib clock:
+For Kvaser, classic bitrate is a `u32` checked against the device's CAN clock (as CANlib reports it, or 80 MHz when it doesn't):
 
 ```rust,no_run
 use can_hal_kvaser::KvaserDriver;
@@ -69,12 +69,14 @@ let mut channel = driver.channel(0).unwrap().fd(500_000, 4_000_000).unwrap().con
 
 ## ISO-TP
 
-Send and receive multi-frame payloads over any `can-hal-rs` backend:
+Send and receive multi-frame payloads over any `can-hal-rs` backend (here, SocketCAN):
 
 ```rust,no_run
 use can_hal::CanId;
 use can_hal_isotp::{IsoTpChannel, IsoTpConfig};
-# fn example<C: can_hal::Transmit<Error = E> + can_hal::Receive<Error = E>, E: can_hal::CanError>(channel: C) {
+use can_hal_socketcan::SocketCanDriver;
+
+let channel = SocketCanDriver::new().channel_by_name("can0").connect().unwrap();
 let config = IsoTpConfig::new(
     CanId::new_standard(0x7E0).unwrap(),
     CanId::new_standard(0x7E8).unwrap(),
@@ -82,7 +84,6 @@ let config = IsoTpConfig::new(
 let mut isotp = IsoTpChannel::new(channel, config);
 isotp.send(&[0x10, 0x01]).unwrap();
 let response = isotp.receive().unwrap();
-# }
 ```
 
 Supports normal, extended, and functional addressing. CAN FD via `IsoTpFdChannel`. Async via the `async` feature flag.

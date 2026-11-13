@@ -12,9 +12,10 @@ use crate::ffi;
 use crate::library::PcanLibrary;
 use crate::mode::{Classic, Fd, FdExplicit, Initial};
 
-/// PCAN-Basic controller clock in Hz.
+/// The CAN clock, in Hz, of the FD timing this crate sets.
 ///
-/// All FD-capable PCAN devices use an 80 MHz CAN clock. Exposed so that
+/// PCAN-Basic's FD timing string selects one of several CAN clocks
+/// (`f_clock_mhz`); this crate always selects 80 MHz. Exposed so that
 /// callers constructing explicit [`PcanFdTiming`] values can verify their
 /// `(brp, tseg1, tseg2)` choices satisfy
 /// `bit_rate = PCAN_CLOCK_HZ / (brp * (1 + tseg1 + tseg2))`.
@@ -28,9 +29,9 @@ const DEFAULT_NOMINAL_SAMPLE_POINT: SamplePoint = SamplePoint::NOMINAL_DEFAULT;
 /// [`PcanChannelBuilder::data_sample_point`] is not called.
 const DEFAULT_DATA_SAMPLE_POINT: SamplePoint = SamplePoint::DATA_DEFAULT;
 
-/// Preferred total TQ count for the nominal phase. The solver biases toward
-/// this value among solutions with equal sample-point error, since it matches
-/// the timing used by other backends in this workspace.
+/// Preferred total TQ count for the nominal phase, which matches the timing
+/// used by other backends in this workspace. The solver adds 0.001 to a
+/// candidate's score per TQ of distance from it.
 const PREFERRED_NOMINAL_TQ: u32 = 20;
 
 /// Preferred total TQ count for the data phase.
@@ -50,10 +51,10 @@ const DATA_MAX_BRP: u32 = 1024;
 const DATA_MAX_TSEG1: u32 = 32;
 const DATA_MAX_TSEG2: u32 = 16;
 
-/// Minimum phase-segment-2 the solver will emit. Windows CANlib rejects a
-/// tseg2 of 1 TQ with canERR_PARAM (Linux drivers accept it), so the solver
-/// keeps tseg2 >= 2 to stay portable. This never changes a default
-/// sample-point result - those already resolve to tseg2 >= 2.
+/// Minimum phase-segment-2 the solver will emit. PCAN-Basic accepts a tseg2
+/// of 1 TQ; the floor mirrors the Kvaser solver, whose Windows CANlib rejects
+/// 1 TQ. It changes some data-phase defaults: at 80% the solver gives
+/// 3.2 Mbit/s 25 TQ instead of 5, and finds no timing for 16 or 20 Mbit/s.
 const MIN_TSEG2: u32 = 2;
 
 /// Bus type for selecting a PCAN hardware family.
@@ -65,11 +66,13 @@ pub enum PcanBusType {
     Lan,
 }
 
-/// Predefined classic-CAN bitrates supported by `CAN_Initialize`.
+/// Predefined classic-CAN bitrates for `CAN_Initialize`.
 ///
-/// PCAN-Basic's classic-CAN init only accepts a fixed set of baud-rate
-/// constants. Modeling them as an enum makes invalid bitrates
-/// unrepresentable at compile time.
+/// `CAN_Initialize` takes a BTR0/BTR1 register value; PCAN-Basic predefines
+/// one for each of these bitrates (and for 95K, 83K, 47K and 33K, which this
+/// enum leaves out). It also accepts custom BTR0/BTR1 values, which this
+/// crate doesn't expose. Modeling the predefined values as an enum makes
+/// invalid bitrates unrepresentable at compile time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ClassicBitrate {
@@ -246,9 +249,10 @@ impl TimingPhase {
 
 /// Solve for a single phase of FD timing at the PCAN 80 MHz clock.
 ///
-/// Searches for an exact-bitrate `(brp, tseg1, tseg2)` whose sample point is
-/// closest to the requested value. Ties are broken by proximity to the
-/// phase's preferred TQ count for cross-adapter interop.
+/// Searches for an exact-bitrate `(brp, tseg1, tseg2)`, scored as
+/// sample-point error plus 0.001 per TQ of distance from the phase's
+/// preferred TQ count (for cross-adapter interop); the lowest score wins.
+/// The TQ term can outweigh a closer sample point.
 ///
 /// Returns `None` if `bitrate_hz` is zero, does not evenly divide 80 MHz,
 /// or if no `(brp, total_tq)` factoring lands inside the segment-length
@@ -350,8 +354,9 @@ fn solve_phase_timing(
 ///
 /// The type parameter `Mode` tracks which configuration path the builder is
 /// on. Start with [`Initial`] (returned by [`PcanDriver::channel`]) and
-/// transition to either [`Classic`] (via [`classic`](Self::classic)) or
-/// [`Fd`] (via [`fd`](Self::fd)). Only the methods valid for the current
+/// transition to [`Classic`] (via [`classic`](Self::classic)), [`Fd`] (via
+/// [`fd`](Self::fd)), or the raw-timing [`FdExplicit`] (via
+/// [`fd_explicit`](Self::fd_explicit)). Only the methods valid for the current
 /// state are available, so calling - for example - `data_sample_point` on a
 /// classic-configured builder is a compile error rather than a runtime no-op.
 pub struct PcanChannelBuilder<Mode> {
@@ -368,13 +373,13 @@ impl PcanChannelBuilder<Initial> {
     ///
     /// # Sample point
     ///
-    /// PCAN-Basic's classic-CAN initialization (`CAN_Initialize`) only
-    /// accepts a fixed set of baud-rate constants and provides no API to
-    /// customize timing segments - there is no sample-point control in
-    /// classic mode. If you need a custom sample point, use [`fd`](Self::fd)
-    /// at the same nominal and data bitrate (`fd(rate, rate)`) so the
-    /// timing solver is engaged via `CAN_InitializeFD`. Note this requires
-    /// FD-capable PCAN hardware.
+    /// Each predefined bitrate has a fixed timing, so classic mode has no
+    /// sample-point control. (`CAN_Initialize` also takes a custom BTR0/BTR1
+    /// register value, which would allow one, but this crate doesn't expose
+    /// it.) [`fd`](Self::fd) at the same nominal and data bitrate
+    /// (`fd(rate, rate)`) does take a sample point, but it opens an FD
+    /// channel: it needs FD-capable PCAN hardware, and it sends FD frames,
+    /// which classic-only nodes on the bus reject.
     #[must_use]
     pub fn classic(self, bitrate: ClassicBitrate) -> PcanChannelBuilder<Classic> {
         PcanChannelBuilder {
@@ -387,8 +392,10 @@ impl PcanChannelBuilder<Initial> {
 
     /// Configure the channel for CAN FD with the given nominal and data
     /// bitrates (both in Hz). Returns `Err` immediately if either bitrate
-    /// does not evenly divide the 80 MHz PCAN clock, so problems surface at
-    /// the call site instead of `connect()`. Sample points default to
+    /// does not evenly divide the 80 MHz PCAN clock. A bitrate that does can
+    /// still have no timing within the segment limits for the chosen sample
+    /// point (e.g. a 20 Mbit/s data phase); then `connect()` returns
+    /// [`PcanError::UnsupportedTiming`]. Sample points default to
     /// [`SamplePoint::NOMINAL_DEFAULT`] (70%) and [`SamplePoint::DATA_DEFAULT`]
     /// (80%); override on the returned builder.
     pub fn fd(self, nominal_hz: u32, data_hz: u32) -> Result<PcanChannelBuilder<Fd>, PcanError> {
@@ -418,13 +425,13 @@ impl PcanChannelBuilder<Initial> {
     /// math (`80 MHz / (brp * (1 + tseg1 + tseg2))`), and the returned
     /// builder has no sample-point setters (only [`connect`](Self::connect)).
     /// Use this when you need control beyond what the solver provides
-    /// (e.g., unusually large SJW values or a non-standard bitrate that
-    /// doesn't divide 80 MHz evenly).
+    /// (e.g. an SJW above the solver's cap of 4, a segment split the solver
+    /// wouldn't pick, or a rate that isn't a whole number of Hz, such as
+    /// 80 MHz / 60 = 1.333 Mbit/s, which [`fd`](Self::fd) can't take).
     ///
-    /// The values are not validated here. For cross-platform timing keep
-    /// `tseg2 >= 2` in both phases: some drivers (notably Windows) reject a
-    /// phase-segment-2 of 1 TQ that other platforms accept. The solver-driven
-    /// [`fd`](Self::fd) path already guarantees this.
+    /// The values are not validated here. PCAN-Basic accepts a `tseg2` of
+    /// 1 TQ; the solver-driven [`fd`](Self::fd) path keeps it at 2 or more
+    /// only to match the Kvaser backend, whose Windows CANlib rejects 1 TQ.
     #[must_use]
     pub fn fd_explicit(self, timing: PcanFdTiming) -> PcanChannelBuilder<FdExplicit> {
         PcanChannelBuilder {
@@ -622,8 +629,8 @@ mod tests {
     #[test]
     fn solver_data_4m_75pct_avoids_tseg2_of_one() {
         // A 75% data sample point at 4 Mbit/s previously resolved to a 4 TQ
-        // timing with tseg2=1, which Windows CANlib rejects (canERR_PARAM).
-        // The MIN_TSEG2 floor forces a portable solution instead.
+        // timing with tseg2=1. The MIN_TSEG2 floor, which mirrors the Kvaser
+        // solver's, forces a timing with tseg2 >= 2 instead.
         let t = solve_phase_timing(4_000_000, SamplePoint::PCT_75, TimingPhase::Data).unwrap();
         assert!(t.tseg2 >= MIN_TSEG2, "tseg2 must be >= 2, got {}", t.tseg2);
         assert_eq!((t.brp, t.tseg1, t.tseg2, t.sjw), (1, 14, 5, 4));

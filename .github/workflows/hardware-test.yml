@@ -12,8 +12,9 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Windows tests run FIRST — USB devices are free at boot (not bound to
-  # host drivers). After Windows tests, ci-usb-to-host binds them for Linux.
+  # Windows tests run FIRST: USB devices are free at boot (not bound to host
+  # drivers) for VM passthrough. After the VM stops, a USB hub power cycle
+  # re-enumerates them on the host for the Linux job.
   windows-hardware-tests:
     name: Windows hardware tests
     # Always run on workflow_dispatch; on PRs, only run when the

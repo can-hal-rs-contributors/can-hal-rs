@@ -4,7 +4,7 @@
 //   - Both adapters must be configured for the same bitrate (default: 500 kbit/s)
 //
 // Software requirements:
-//   - Linux: KVASER Linux drivers and libcanlib.so installed
+//   - Linux: KVASER Linux drivers and libcanlib.so.1 installed
 //     Install from: https://www.kvaser.com/downloads-kvaser/
 //   - Windows: CANlib SDK installed (canlib32.dll in system PATH)
 //     Install from: https://www.kvaser.com/downloads-kvaser/
@@ -38,16 +38,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let frame = timestamped.frame();
                 let elapsed = timestamped.timestamp().elapsed();
 
+                let payload = if frame.is_remote_frame() {
+                    "RTR".to_string()
+                } else {
+                    format!(
+                        "data=[{}]",
+                        frame
+                            .data()
+                            .iter()
+                            .map(|b| format!("{b:02X}"))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )
+                };
                 println!(
-                    "RX: ID=0x{:03X} DLC={} data=[{}] ({elapsed:.1?} ago)",
+                    "RX: ID=0x{:03X} DLC={} {payload} ({elapsed:.1?} ago)",
                     frame.id().raw(),
-                    frame.len(),
-                    frame
-                        .data()
-                        .iter()
-                        .map(|b| format!("{b:02X}"))
-                        .collect::<Vec<_>>()
-                        .join(" "),
+                    frame.dlc(),
                 );
             }
             None => {

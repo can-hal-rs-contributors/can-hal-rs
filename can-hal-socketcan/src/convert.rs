@@ -143,29 +143,31 @@ pub fn from_socketcan_fd_frame(frame: &ScFdFrame) -> Result<HalFdFrame, SocketCa
     })
 }
 
-/// Convert a socketcan CanAnyFrame to a can-hal Frame.
-pub fn from_socketcan_any_frame(frame: CanAnyFrame) -> Result<HalFrame, SocketCanError> {
+/// Convert a socketcan frame to a can-hal Frame; `None` for an error frame.
+pub fn from_socketcan_any_frame(frame: &CanAnyFrame) -> Option<Result<HalFrame, SocketCanError>> {
     match frame {
         CanAnyFrame::Normal(data_frame) => {
-            Ok(HalFrame::Can(from_socketcan_data_frame(&data_frame)?))
+            Some(from_socketcan_data_frame(data_frame).map(HalFrame::Can))
         }
-        CanAnyFrame::Fd(fd_frame) => Ok(HalFrame::Fd(from_socketcan_fd_frame(&fd_frame)?)),
         CanAnyFrame::Remote(remote_frame) => {
-            Ok(HalFrame::Can(from_socketcan_remote_frame(&remote_frame)?))
+            Some(from_socketcan_remote_frame(remote_frame).map(HalFrame::Can))
         }
-        CanAnyFrame::Error(_) => Err(SocketCanError::InvalidFrame(
-            "error frames are not supported".into(),
-        )),
+        CanAnyFrame::Fd(fd_frame) => Some(from_socketcan_fd_frame(fd_frame).map(HalFrame::Fd)),
+        CanAnyFrame::Error(_) => None,
     }
 }
 
 /// Convert a can-hal Filter to a socketcan CanFilter.
 ///
 /// Re-clamps the mask to the ID width to defend against struct-literal
-/// `Filter` construction that bypasses `Filter::new`.
+/// `Filter` construction that bypasses `Filter::new`. Both masks include
+/// `CAN_EFF_FLAG`, so the kernel compares the frame type too: a standard
+/// filter rejects extended frames and an extended filter standard ones.
+/// `CAN_RTR_FLAG` stays out of the mask, so remote frames match like data
+/// frames.
 pub fn to_socketcan_filter(filter: &HalFilter) -> CanFilter {
     let (raw_id, mask) = match filter.id {
-        CanId::Standard(v) => (u32::from(v), filter.mask & 0x7FF),
+        CanId::Standard(v) => (u32::from(v), (filter.mask & 0x7FF) | CAN_EFF_FLAG),
         CanId::Extended(v) => (
             (v & 0x1FFF_FFFF) | CAN_EFF_FLAG,
             (filter.mask & 0x1FFF_FFFF) | CAN_EFF_FLAG,
@@ -219,7 +221,7 @@ mod tests {
         let frame = CanFrame::new(id, &[0xFF]).unwrap();
         let sc = to_socketcan_data_frame(&frame).unwrap();
         let any = CanAnyFrame::Normal(sc);
-        let back = from_socketcan_any_frame(any).unwrap();
+        let back = from_socketcan_any_frame(&any).unwrap().unwrap();
         assert_eq!(back, HalFrame::Can(frame));
     }
 
@@ -230,7 +232,7 @@ mod tests {
         let frame = HalFdFrame::new(id, &data, false, true).unwrap();
         let sc = to_socketcan_fd_frame(&frame).unwrap();
         let any = CanAnyFrame::Fd(sc);
-        let back = from_socketcan_any_frame(any).unwrap();
+        let back = from_socketcan_any_frame(&any).unwrap().unwrap();
         assert_eq!(back, HalFrame::Fd(frame));
     }
 
@@ -278,7 +280,9 @@ mod tests {
         let id = CanId::new_standard(0x500).unwrap();
         let frame = CanFrame::new_remote(id, 4).unwrap();
         let sc = to_socketcan_remote_frame(&frame).unwrap();
-        let back = from_socketcan_any_frame(CanAnyFrame::Remote(sc)).unwrap();
+        let back = from_socketcan_any_frame(&CanAnyFrame::Remote(sc))
+            .unwrap()
+            .unwrap();
         assert_eq!(back, HalFrame::Can(frame.clone()));
         let classic = from_socketcan_classic_frame(&CanAnyFrame::Remote(sc))
             .unwrap()
@@ -293,8 +297,8 @@ mod tests {
             mask: 0x7FF,
         };
         let sc = to_socketcan_filter(&filter);
-        // Standard ID should not have CAN_EFF_FLAG set
-        assert_eq!(sc, CanFilter::new(0x100, 0x7FF));
+        // The ID has no CAN_EFF_FLAG, and the mask makes it count.
+        assert_eq!(sc, CanFilter::new(0x100, 0x7FF | CAN_EFF_FLAG));
     }
 
     #[test]
@@ -308,5 +312,23 @@ mod tests {
             sc,
             CanFilter::new(0x1234 | CAN_EFF_FLAG, 0x1FFF_FFFF | CAN_EFF_FLAG)
         );
+    }
+
+    #[test]
+    fn any_frame_error_is_skipped() {
+        let err = socketcan::CanErrorFrame::new_error(0x004, &[]).unwrap();
+        assert!(from_socketcan_any_frame(&CanAnyFrame::Error(err)).is_none());
+    }
+
+    #[test]
+    fn any_frame_fd_invalid_length_is_an_error() {
+        let mut raw = socketcan::frame::canfd_frame_default();
+        raw.can_id = 0x123;
+        raw.len = 9;
+        let any = CanAnyFrame::Fd(ScFdFrame::from(raw));
+        assert!(matches!(
+            from_socketcan_any_frame(&any),
+            Some(Err(SocketCanError::InvalidFrame(_)))
+        ));
     }
 }

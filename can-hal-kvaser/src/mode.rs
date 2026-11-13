@@ -4,8 +4,9 @@
 //! [`KvaserChannelBuilder`](crate::KvaserChannelBuilder) and
 //! [`KvaserChannel`](crate::KvaserChannel) to encode which configuration
 //! path the channel is on. The compiler then restricts which methods are
-//! callable in each state. Their internals are private; external code can
-//! name them in signatures but cannot construct or inspect them.
+//! callable in each state. Their internals are private, so external code can
+//! name them in signatures but can't construct or inspect them, apart from
+//! the unit struct [`Initial`], which is of no use on its own.
 
 use can_hal::SamplePoint;
 

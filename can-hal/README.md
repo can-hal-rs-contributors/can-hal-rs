@@ -22,7 +22,7 @@ This crate is `no_std`-compatible (requires Rust 1.81+). The `std` feature is en
 
 ```toml
 [dependencies]
-can-hal-rs = { version = "0.3", default-features = false }
+can-hal-rs = { version = "0.4", default-features = false }
 ```
 
 ## Traits
@@ -36,12 +36,12 @@ can-hal-rs = { version = "0.3", default-features = false }
 
 Async variants (`AsyncTransmit`, `AsyncReceive`, etc.) are available behind the `async` feature flag.
 
-There is no shared `Driver` or `ChannelBuilder` trait - each backend exposes its own concrete driver and a typestate-driven builder where invalid combinations are compile errors. See the backend crates for details.
+There is no shared `Driver` or `ChannelBuilder` trait - each backend exposes its own concrete driver and builder. The PCAN and Kvaser builders are typestate-driven, so invalid combinations are compile errors. See the backend crates for details.
 
 ## Usage
 
 ```rust
-use can_hal::{CanId, CanFrame, Transmit, Receive};
+use can_hal::{Transmit, Receive};
 
 fn echo<T: Transmit<Error = E> + Receive<Error = E>, E: can_hal::CanError>(
     channel: &mut T,

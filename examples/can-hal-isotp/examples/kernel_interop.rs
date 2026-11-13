@@ -138,10 +138,10 @@ fn kernel_write(sock: i32, data: &[u8]) -> Result<usize, String> {
 
 // ---- Tests ------------------------------------------------------------------
 
-/// Test A: our IsoTpChannel sends, kernel socket receives.
-fn test_our_send_kernel_recv(ifname: &str, payload: &[u8]) -> bool {
+/// Tests A and C: our IsoTpChannel sends, kernel socket receives.
+fn test_our_send_kernel_recv(test: char, ifname: &str, payload: &[u8]) -> bool {
     let label = format!(
-        "Test A ({} bytes): our crate sends, kernel receives",
+        "Test {test} ({} bytes): our crate sends, kernel receives",
         payload.len()
     );
     println!("\n{label}");
@@ -295,7 +295,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut failed = 0u32;
 
     // Test A: our crate sends 20 bytes, kernel receives
-    if test_our_send_kernel_recv(&ifname, &small_payload) {
+    if test_our_send_kernel_recv('A', &ifname, &small_payload) {
         passed += 1;
     } else {
         failed += 1;
@@ -309,7 +309,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Test C: our crate sends 4000 bytes, kernel receives
-    if test_our_send_kernel_recv(&ifname, &large_payload) {
+    if test_our_send_kernel_recv('C', &ifname, &large_payload) {
         passed += 1;
     } else {
         failed += 1;

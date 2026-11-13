@@ -4,7 +4,7 @@ use can_hal::frame::CanFdFrame;
 
 use crate::config::{AddressingMode, IsoTpConfig};
 use crate::error::IsoTpError;
-use crate::frame::{self, interpret_st_min, next_fd_dlc, FcFlag, IsoTpFrame};
+use crate::frame::{self, has_fc_pci, interpret_st_min, next_fd_dlc, FcFlag, IsoTpFrame};
 
 /// Async ISO-TP transport channel for CAN FD.
 pub struct AsyncIsoTpFdChannel<C> {
@@ -76,7 +76,11 @@ where
 
             offset = end;
             sn = (sn + 1) & 0x0F;
-            block_count += 1;
+            // Counted only under a block size: with BS 0 nothing resets
+            // the count, so a long message would overflow it.
+            if fc_bs > 0 {
+                block_count += 1;
+            }
 
             if offset < data.len() {
                 if !st_min_dur.is_zero() {
@@ -115,8 +119,12 @@ where
                     continue;
                 }
 
-                let isotp = IsoTpFrame::parse(frame.data(), overhead)
-                    .map_err(|_| IsoTpError::InvalidFrame)?;
+                // ISO 15765-2 has a receiver ignore a frame that isn't a valid
+                // N_PDU (an unknown PCI type, a bad length or flow status), as
+                // the Linux kernel does.
+                let Ok(isotp) = IsoTpFrame::parse(frame.data(), overhead) else {
+                    continue;
+                };
 
                 match isotp {
                     IsoTpFrame::SingleFrame { data } => {
@@ -125,6 +133,7 @@ where
                     IsoTpFrame::FirstFrame { total_len, data } => {
                         return Ok((Some(total_len), data.to_vec()));
                     }
+                    // A CF with no reception in progress, or an FC: ignore it.
                     _ => {}
                 }
             }
@@ -132,7 +141,7 @@ where
         .await
         .map_err(|_| IsoTpError::Timeout)??;
 
-        let Some(total_len) = total_len else {
+        let Some(mut total_len) = total_len else {
             return Ok(collected);
         };
 
@@ -141,8 +150,10 @@ where
         let mut expected_sn: u8 = 1;
         let mut block_count: u16 = 0;
 
+        // N_Cr: restarted by each CF and by a new FF, not by ignored frames.
+        let mut cf_deadline = self.config.tokio_deadline();
         while collected.len() < total_len {
-            let cf_frame = tokio::time::timeout(self.config.timeout, async {
+            let cf_frame = tokio::time::timeout_at(cf_deadline, async {
                 loop {
                     let ts = self
                         .channel
@@ -164,34 +175,58 @@ where
             .await
             .map_err(|_| IsoTpError::Timeout)??;
 
-            let parsed = IsoTpFrame::parse(cf_frame.data(), overhead)
-                .map_err(|_| IsoTpError::InvalidFrame)?;
+            // Ignored, as above; the CF deadline stands.
+            let Ok(parsed) = IsoTpFrame::parse(cf_frame.data(), overhead) else {
+                continue;
+            };
 
-            if let IsoTpFrame::ConsecutiveFrame { sn, data } = parsed {
-                if sn != expected_sn {
-                    return Err(IsoTpError::SequenceError {
-                        expected: expected_sn,
-                        got: sn,
-                    });
+            match parsed {
+                IsoTpFrame::ConsecutiveFrame { sn, data } => {
+                    if sn != expected_sn {
+                        return Err(IsoTpError::SequenceError {
+                            expected: expected_sn,
+                            got: sn,
+                        });
+                    }
+
+                    let bytes_needed = total_len - collected.len();
+                    let take = data.len().min(bytes_needed);
+                    collected.extend_from_slice(&data[..take]);
+
+                    expected_sn = (expected_sn + 1) & 0x0F;
+                    // Counted only under a block size, as in send().
+                    if self.config.block_size > 0 {
+                        block_count += 1;
+                    }
+
+                    cf_deadline = self.config.tokio_deadline();
+
+                    if self.config.block_size > 0
+                        && block_count >= u16::from(self.config.block_size)
+                        && collected.len() < total_len
+                    {
+                        self.send_fc(FcFlag::ContinueToSend).await?;
+                        block_count = 0;
+                    }
                 }
-
-                let bytes_needed = total_len - collected.len();
-                let take = data.len().min(bytes_needed);
-                collected.extend_from_slice(&data[..take]);
-
-                expected_sn = (expected_sn + 1) & 0x0F;
-                block_count += 1;
-
-                if self.config.block_size > 0
-                    && block_count >= u16::from(self.config.block_size)
-                    && collected.len() < total_len
-                {
+                // ISO 15765-2 (unexpected N_PDU): an SF or FF that arrives
+                // during a reception ends it. The partial message is dropped,
+                // and the new frame is handled as the start of a new reception.
+                IsoTpFrame::SingleFrame { data } => return Ok(data.to_vec()),
+                IsoTpFrame::FirstFrame {
+                    total_len: new_len,
+                    data,
+                } => {
+                    total_len = new_len;
+                    collected.clear();
+                    collected.extend_from_slice(data);
                     self.send_fc(FcFlag::ContinueToSend).await?;
+                    expected_sn = 1;
                     block_count = 0;
+                    cf_deadline = self.config.tokio_deadline();
                 }
-            } else {
-                // Per ISO 15765-2, unexpected PCI types during
-                // CF reassembly are silently ignored.
+                // An FC is meant for a sender; a receiver ignores it.
+                IsoTpFrame::FlowControl { .. } => {}
             }
         }
 
@@ -219,8 +254,16 @@ where
                     continue;
                 }
 
-                let isotp = IsoTpFrame::parse(frame.data(), overhead)
-                    .map_err(|_| IsoTpError::InvalidFrame)?;
+                let isotp = match IsoTpFrame::parse(frame.data(), overhead) {
+                    Ok(isotp) => isotp,
+                    // A malformed FC ends the transfer, as in the Linux
+                    // kernel; any other frame that doesn't parse isn't for a
+                    // sender.
+                    Err(_) if has_fc_pci(frame.data(), overhead) => {
+                        return Err(IsoTpError::InvalidFrame);
+                    }
+                    Err(_) => continue,
+                };
 
                 if let IsoTpFrame::FlowControl {
                     flag,
@@ -264,8 +307,8 @@ where
         self.transmit_padded_fd(&mut buf, len).await
     }
 
-    /// CAN FD frames must use a valid DLC size, so always round up. Fill gap
-    /// with the configured padding byte or 0x00.
+    /// CAN FD frames must have a valid data length, so always round up. Fill
+    /// the gap with the configured padding byte or 0x00.
     async fn transmit_padded_fd(
         &mut self,
         buf: &mut [u8; 64],
