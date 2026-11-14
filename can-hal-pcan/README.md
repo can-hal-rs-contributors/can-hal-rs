@@ -44,12 +44,14 @@ println!("{:?}", response.frame());
 
 Classic bitrate is a `ClassicBitrate` enum so invalid values aren't representable; `.classic(...)` is infallible.
 
+`channel(index)` selects a USB channel; use `channel_on_bus(PcanBusType::Pci, index)` (or `Lan`) for PCI and LAN. `PcanDriver::with_library_path(path)` loads PCAN-Basic from a non-default path.
+
 ## CAN FD
 
 `.fd(nominal_hz, data_hz)` validates that both bitrates evenly divide the 80 MHz PCAN clock; on success the builder transitions to FD state and exposes sample-point overrides. Defaults are 70% nominal and 80% data; override via `.sample_point()` / `.data_sample_point()` with a `SamplePoint` value:
 
 ```rust,no_run
-use can_hal::{SamplePoint, TransmitFd, CanId, CanFdFrame};
+use can_hal::SamplePoint;
 use can_hal_pcan::PcanDriver;
 
 let driver = PcanDriver::new().unwrap();
@@ -80,6 +82,10 @@ let _channel = driver
     .connect()
     .unwrap();
 ```
+
+## Filters
+
+PCAN-Basic filters by ID range. `set_filters` converts each filter to its smallest covering range and merges them into one range per ID type, which can pass unlisted IDs. Frames of an ID type with no filter are dropped.
 
 ## Prerequisites
 

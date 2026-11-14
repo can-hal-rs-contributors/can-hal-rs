@@ -15,7 +15,7 @@
 
 > **Warning:** These crates are unstable and under active development. APIs may change without notice. Not yet recommended for production use.
 
-Backend implementations for Linux SocketCAN, PEAK PCAN, and KVASER adapters. The core `can-hal-rs` traits crate is `no_std`-compatible.
+Backend implementations for Linux SocketCAN, PEAK PCAN, and KVASER adapters, plus an ISO-TP transport layer. The core `can-hal-rs` traits crate has no dependencies and is `no_std`-compatible.
 
 ## Crates
 
@@ -27,7 +27,23 @@ Backend implementations for Linux SocketCAN, PEAK PCAN, and KVASER adapters. The
 | [`can-hal-kvaser`](can-hal-kvaser/) | KVASER CANlib backend (Windows and Linux) |
 | [`can-hal-isotp`](can-hal-isotp/) | ISO-TP (ISO 15765-2) transport layer |
 
-The PCAN and Kvaser backends expose a concrete driver with a typestate-driven builder: `.channel(idx)` returns an `Initial` state, then `.classic(...)` or `.fd(nominal, data)` transitions to a `Classic` or `Fd` state where only the methods valid for that mode are callable. Channels are likewise mode-parameterized - `PcanChannel<Classic>` implements `Transmit + Receive`; `PcanChannel<Fd>` implements `TransmitFd + ReceiveFd`. Invalid combinations are compile errors, not runtime errors. SocketCAN's timing is set by the OS, so its builder only picks the interface, and one `SocketCanChannel` implements both the classic and FD traits.
+## Features
+
+- Classic CAN data and remote frames, standard and extended IDs, DLCs 9-15
+- CAN FD frames up to 64 bytes, with BRS and ESI
+- Acceptance filters and bus status
+- Async trait variants (`async` feature); the backends here implement only the blocking traits
+
+## Backends
+
+| | SocketCAN | PCAN | Kvaser |
+|---|---|---|---|
+| Platforms | Linux | Windows, Linux | Windows, Linux |
+| Vendor library | none | PCAN-Basic, loaded at runtime | CANlib, loaded at runtime |
+| Timing | OS (`ip link`) | `ClassicBitrate` enum; FD in Hz with sample points | Hz with sample points |
+| Filters | exact, per filter | one ID range per ID type | one code/mask per ID type |
+| DLCs 9-15 | with `cc-len8-dlc on` | sent, untested | classic channels only |
+| `BusStatus` | no | yes; error counters on Linux only | yes |
 
 ## Example
 
@@ -86,7 +102,37 @@ isotp.send(&[0x10, 0x01]).unwrap();
 let response = isotp.receive().unwrap();
 ```
 
-Supports normal, extended, and functional addressing. CAN FD via `IsoTpFdChannel`. Async via the `async` feature flag.
+## Examples
+
+Example crates live under [`examples/`](examples/):
+
+```bash
+cargo run -p can-hal-socketcan-examples --example socketcan_send -- vcan0
+cargo run -p can-hal-pcan-examples --example pcan_send_fd
+cargo run -p can-hal-kvaser-examples --example kvaser_receive
+cargo run -p can-hal-isotp-examples --example loopback -- vcan0
+```
+
+The PCAN and Kvaser examples need the adapter and vendor library. The rest run on `vcan0` ([setup](can-hal-socketcan/README.md#interface-setup)), except the ISO-TP `cross_adapter*` examples, which need PCAN and Kvaser adapters. `kernel_interop` also needs the `can-isotp` kernel module.
+
+## Testing
+
+```bash
+# Unit tests
+cargo test -p can-hal-rs -p can-hal-isotp --features async
+cargo test -p can-hal-socketcan -p can-hal-pcan -p can-hal-kvaser
+
+# Hardware: PCAN and Kvaser adapters on one bus
+cargo test -p hardware-tests -- --test-threads=1
+
+# Software-in-the-loop: SocketCAN over vcan0, Kvaser virtual channels
+CAN_HAL_REQUIRE_VCAN=1 cargo test -p hardware-tests --features vcan \
+  --test socketcan_vcan -- --test-threads=1
+CAN_HAL_REQUIRE_KVASER_VIRTUAL=1 cargo test -p hardware-tests --features kvaser-virtual \
+  --test kvaser_virtual -- --test-threads=1
+```
+
+`--test-threads=1` is required. Without `CAN_HAL_REQUIRE_*`, the software-in-the-loop tests skip when `vcan0` or the Kvaser virtual channels are missing.
 
 ## License
 
