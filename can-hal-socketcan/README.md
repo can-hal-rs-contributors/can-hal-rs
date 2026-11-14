@@ -36,6 +36,12 @@ let response = channel.receive().unwrap();
 println!("{:?}", response.frame());
 ```
 
+`driver.channel(index)` selects an interface by kernel index instead of name.
+
+## Filters
+
+Each filter applies exactly, to frames of its own ID type. A frame passes if any filter matches.
+
 ## Interface setup
 
 SocketCAN bitrate is configured at the OS level, not through the socket API:
@@ -44,6 +50,7 @@ SocketCAN bitrate is configured at the OS level, not through the socket API:
 sudo ip link set can0 type can bitrate 500000
 # or, for CAN FD:
 sudo ip link set can0 type can bitrate 500000 dbitrate 4000000 fd on
+# append `cc-len8-dlc on` to keep classic DLCs 9-15 (if the driver supports it)
 sudo ip link set can0 up
 ```
 

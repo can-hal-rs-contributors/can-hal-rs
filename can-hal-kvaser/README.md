@@ -40,6 +40,8 @@ let response = channel.receive().unwrap();
 println!("{:?}", response.frame());
 ```
 
+`KvaserDriver::with_library_path(path)` loads CANlib from a non-default path. Virtual channels require `.accept_virtual(true)` on the builder.
+
 ## CAN FD
 
 ```rust,no_run
@@ -95,6 +97,10 @@ let _channel = driver
     .connect()
     .unwrap();
 ```
+
+## Filters
+
+CANlib has one acceptance code and mask per ID type. `set_filters` merges filters into one code/mask per ID type, which can pass unlisted IDs. Frames of an ID type with no filter are dropped.
 
 ## Prerequisites
 
